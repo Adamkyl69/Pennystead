@@ -280,6 +280,63 @@ pages.transactions = {
   },
 };
 
+// ---------- Goals ----------
+const GOAL_STATUS = { reached: ['good', 'Reached'], on_track: ['good', 'On track'], behind: ['bad', 'Behind'], projected: ['', 'No deadline'], not_reachable: ['bad', 'Not growing'], no_history: ['', 'Not enough history'] };
+const goalUi = { editing: null };
+const monthName = (m) => (m ? new Date(m + '-01T00:00:00Z').toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' }) : '');
+function goalSentence(g) {
+  const pace = g.monthlyUsed == null ? '' : `${money(g.monthlyUsed)}/month${g.monthly == null ? ' (your pace over the last 6 months)' : ' (the amount you set)'}${g.growth ? ` plus ${g.growth}% a year growth` : ''}`;
+  if (g.status === 'reached') return `You have reached this goal: ${money(g.current)} of ${money(g.target)}.`;
+  if (g.status === 'no_history') return 'There is not enough history yet to project. Set a monthly saving amount to see a projection.';
+  if (g.status === 'not_reachable') return `At ${pace} this balance is not growing, so the target is out of reach. ${g.neededMonthly != null ? `To get there by ${monthName(g.deadlineMonth)} you need ${money(g.neededMonthly)}/month.` : 'Set a monthly saving amount to see when you would get there.'}`;
+  const when = `At ${pace} you reach it in <b>${monthName(g.reachDate)}</b>`;
+  if (!g.by) return `${when}.`;
+  const diff = (Date.parse(g.deadlineMonth + '-01') - Date.parse(g.reachDate + '-01')) / (30.44 * 864e5), months = Math.round(Math.abs(diff));
+  return `${when}, ${months ? `${months} month${months === 1 ? '' : 's'} ${diff >= 0 ? 'before' : 'after'}` : 'right at'} your ${monthName(g.deadlineMonth)} deadline. You need <b>${money(g.neededMonthly)}/month</b> to make it.`;
+}
+pages.goals = {
+  title: 'Goals',
+  async render(el) {
+    const r = await api('/api/goals'), gs = r.goals, ed = gs.find((g) => g.id === goalUi.editing);
+    const form = `<form id="goalForm" class="form" ${gs.length && !ed && !goalUi.adding ? 'hidden' : ''} style="margin-bottom:14px">
+        <label>Goal<input type="text" name="name" required maxlength="60" placeholder="House deposit" value="${esc(ed?.name || '')}"></label>
+        <label>Target (${esc(BASE)})<input type="number" name="target" required min="1" step="any" value="${ed?.target ?? ''}"></label>
+        <label>By (optional)<input type="date" name="by" value="${esc(ed?.by || '')}"></label>
+        <label>Track<select name="source">${r.sources.map((s) => `<option value="${esc(s.id)}" ${(ed?.source || 'liquid') === s.id ? 'selected' : ''}>${esc(s.label)}</option>`).join('')}</select></label>
+        <label>Monthly saving (blank = your real pace)<input type="number" name="monthly" step="any" value="${ed?.monthly ?? ''}" placeholder="auto"></label>
+        <label>Expected yearly return %<input type="number" name="growth" step="0.1" min="-50" max="50" value="${ed?.growth || ''}" placeholder="0"></label>
+        <div class="row"><button class="btn primary">${ed ? 'Save goal' : 'Add goal'}</button>${ed || gs.length ? '<button type="button" class="btn" id="goalCancel">Cancel</button>' : ''}</div></form>`;
+    el.innerHTML = `
+      ${card('Savings goals', 'Set a target, optionally a date, and the balance it tracks. Progress comes from your real balances; the projection continues the pace you have actually been saving at.', form + (gs.length ? '' : '<p class="empty">No goals yet. Add your first one above, for example an emergency fund of three months of spending.</p>'), gs.length ? '<button class="btn primary sm" id="goalAdd">+ Add goal</button>' : '')}
+      ${gs.map((g) => { const [cls, label] = GOAL_STATUS[g.status]; return card(`${esc(g.name)} <span class="pill ${cls}" style="margin-left:8px;vertical-align:middle">${label}</span>`, `${esc(g.sourceLabel)}${g.by ? ` · by ${esc(monthName(g.deadlineMonth))}` : ''}`,
+        `<div class="row" style="justify-content:space-between;margin-bottom:6px"><span><b>${money(g.current)}</b> <span class="muted">of ${money(g.target)}</span></span><span class="muted">${g.pct}%</span></div>
+         <div class="track" style="height:8px;margin-bottom:12px" role="progressbar" aria-valuenow="${g.pct}" aria-valuemin="0" aria-valuemax="100" aria-label="${esc(g.name)} progress"><div class="fill" style="width:${g.pct}%;background:var(--s1)"></div></div>
+         <p style="margin:0 0 12px;font-size:13px">${goalSentence(g)}</p>
+         <div class="chart" id="gc-${g.id}"></div><div id="gl-${g.id}"></div>`,
+        `<span class="row"><button class="btn sm" data-gedit="${g.id}">Edit</button><button class="btn sm danger" data-gdel="${g.id}">Delete</button></span>`); }).join('')}`;
+    for (const g of gs) {
+      const pts = g.points, idx = (m) => pts.findIndex((p) => p.month === m), now = pts.map((p) => p.actual != null).lastIndexOf(true); // this month: the last one with a real balance
+      const series = [{ name: 'Saved', color: 'var(--s1)', points: pts.map((p) => ({ x: p.month, y: p.actual })) }];
+      if (pts.some((p, i) => i > now && p.projected != null)) series.push({ name: g.monthly == null ? 'Projected at your pace' : 'Projected', color: 'var(--s1)', dash: true, points: pts.map((p) => ({ x: p.month, y: p.projected })) });
+      if (pts.some((p, i) => i > now && p.needed != null)) series.push({ name: 'Needed to hit the date', color: 'var(--s2)', dash: true, points: pts.map((p) => ({ x: p.month, y: p.needed })) });
+      const marks = [{ i: now, label: 'Today' }]; if (g.deadlineMonth && idx(g.deadlineMonth) > now) marks.push({ i: idx(g.deadlineMonth), label: 'Deadline' });
+      lineChart($(`#gc-${g.id}`, el), { series, fmtX: (m) => keyLabel(m), refs: [{ y: g.target, label: `Target ${money(g.target)}` }], marks, height: 230 });
+      $(`#gl-${g.id}`, el).innerHTML = legend([...series.map((s) => ({ name: s.name, color: s.color, dash: s.dash })), { name: 'Target', color: 'var(--text2)', ref: true }]);
+    }
+    const f = $('#goalForm', el);
+    if ($('#goalAdd', el)) $('#goalAdd', el).onclick = () => { goalUi.editing = null; goalUi.adding = true; go(); };
+    if ($('#goalCancel', el)) $('#goalCancel', el).onclick = () => { goalUi.editing = null; goalUi.adding = false; go(); };
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const body = Object.fromEntries(new FormData(f));
+      if (ed) await run(() => api(`/api/goals/${ed.id}`, 'PUT', body), 'Goal saved'); else await run(() => api('/api/goals', 'POST', body), 'Goal added');
+      goalUi.editing = null; goalUi.adding = false; go();
+    };
+    $$('[data-gedit]', el).forEach((b) => (b.onclick = () => { goalUi.editing = b.dataset.gedit; goalUi.adding = false; go(); }));
+    $$('[data-gdel]', el).forEach((b) => (b.onclick = async () => { if (!confirm('Delete this goal? Your balances are not affected.')) return; await run(() => api(`/api/goals/${b.dataset.gdel}`, 'DELETE'), 'Goal deleted'); go(); }));
+  },
+};
+
 // ---------- Review ----------
 const SEV = { high: 'var(--bad)', medium: 'var(--warn)', low: 'var(--muted)' };
 const ANOM = { unusual_amount: 'Unusually large', new_merchant: 'New merchant', duplicate_charge: 'Possible duplicate', category_spike: 'Spending spike', price_increase: 'Price increase' };

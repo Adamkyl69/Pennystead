@@ -8,6 +8,7 @@ const { eb, configured } = require('./lib/eb');
 const { sync } = require('./lib/sync');
 const { updatePrices } = require('./lib/prices');
 const core = require('./lib/core');
+const goals = require('./lib/goals');
 const manual = require('./lib/manual');
 const backup = require('./lib/backup');
 const gdrive = require('./lib/gdrive');
@@ -131,6 +132,13 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
         if (!PACKAGED && process.env.PENNYSTEAD_ALLOW_QUIT !== '1') throw HttpError(403, 'Quit is only available in the installed app.');
         json(res, 200, { ok: true }); setTimeout(() => process.exit(0), 200); return;
       }
+      if (P === '/api/goals') {
+        if (METHOD === 'POST') return json(res, 200, goals.create(await readBody(req)));
+        return json(res, 200, goals.list());
+      }
+      const gm = P.match(/^\/api\/goals\/([a-f0-9]{8})$/);
+      if (gm && METHOD === 'PUT') return json(res, 200, goals.update(gm[1], await readBody(req)));
+      if (gm && METHOD === 'DELETE') { goals.remove(gm[1]); return json(res, 200, {}); }
       if (P === '/api/mcp-prompts') return json(res, 200, require('./lib/prompts').list());
       if (P === '/api/mcp-config') {
         const custom = !!(process.env.PENNYSTEAD_DATA || process.env.DATA_DIR);

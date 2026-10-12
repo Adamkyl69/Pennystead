@@ -36,6 +36,7 @@ const tools = {
     },
   },
   subscriptions: { d: 'Detected recurring subscriptions and bills with price increases, duplicates, overlaps, lapsed ones and yearly cost.', s: {}, f: async () => A.subscriptions(await core.transactions(), core.today()) },
+  goals: { d: 'Savings goals: target, deadline, what they track, current amount, saving pace, projected date, monthly amount needed to hit the deadline, and status (on_track, behind, reached...).', s: {}, f: async () => require('./lib/goals').list().goals.map(({ points, ...g }) => g) },
   review_queue: { d: 'Merchants that are still uncategorized, with totals, Pennystead\'s suggested category and confidence, plus the list of existing categories.', s: {}, f: async () => { const r = await core.review(); return { merchants: r.merchants.map(({ name, count, total, dir, last, suggestion }) => ({ name, count, total, direction: dir, last, suggestion })), categories: r.categories.map((c) => c.account) }; } },
   anomalies: { d: 'Unusual charges: outsized amounts, first-time big merchants, duplicate charges, category spikes, price hikes.', s: {}, f: async () => { const t = await core.transactions(), td = core.today(); return A.anomalies(t, A.subscriptions(t, td), td, loadConfig().anomalyMin); } },
   ...(hledgerInstalled() ? { hledger_query: {

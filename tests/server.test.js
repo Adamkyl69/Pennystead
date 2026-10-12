@@ -194,3 +194,13 @@ test('the web app manifest is public (browsers fetch it without the login cookie
   assert.equal(JSON.parse((await post(port, '/api/window', { mode: 'browser' })).body).mode, 'browser');
   assert.equal(JSON.parse((await post(port, '/api/window', { mode: 'app' })).body).mode, 'app');
 });
+
+test('goals API: create, read with projection, update, delete; bad input is a 400', async () => {
+  const g = JSON.parse((await post(port, '/api/goals', { name: 'Fund', target: '5000', source: 'liquid' })).body);
+  assert.match(g.id, /^[a-f0-9]{8}$/);
+  const list = JSON.parse((await raw(port, { url: '/api/goals' })).body);
+  assert.ok(list.goals.some((x) => x.id === g.id && Array.isArray(x.points))); assert.ok(list.sources.some((s) => s.id === 'liquid'));
+  assert.equal((await putJson(port, `/api/goals/${g.id}`, { target: '6000' })).status, 200);
+  assert.equal((await post(port, '/api/goals', { name: '', target: '1' })).status, 400);
+  assert.equal((await raw(port, { method: 'DELETE', url: `/api/goals/${g.id}`, headers: { origin: `http://localhost:${port}` } })).status, 200);
+});

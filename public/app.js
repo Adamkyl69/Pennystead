@@ -78,25 +78,35 @@ function roundTop(x, y, w, h, r) {
   r = Math.min(r, h, w / 2);
   return `M${x} ${y + h}L${x} ${y + r}Q${x} ${y} ${x + r} ${y}L${x + w - r} ${y}Q${x + w} ${y} ${x + w} ${y + r}L${x + w} ${y + h}Z`;
 }
-const legend = (items) => `<div class="legend">${items.map((i) => `<span><span class="sw" style="background:${i.color}"></span>${esc(i.name)}</span>`).join('')}</div>`;
+// A dashed series gets a dashed line swatch, so "Projected" is told apart from "Saved" without relying on color.
+const legend = (items) => `<div class="legend">${items.map((i) => `<span>${i.dash || i.ref ? `<svg width="18" height="8" aria-hidden="true" style="margin-right:6px;vertical-align:middle"><line x1="1" x2="17" y1="4" y2="4" stroke="${i.color}" stroke-width="2" stroke-dasharray="${i.ref ? '2 3' : '5 3'}"/></svg>` : `<span class="sw" style="background:${i.color}"></span>`}${esc(i.name)}</span>`).join('')}</div>`;
 
 /** Lines over a shared x axis. series: [{name,color,points:[{x,y}]}] */
-function lineChart(el, { series, height = 250, fmtX = (x) => x, fmtTip }) {
+/**
+ * Line chart. series: [{ name, color, points: [{x, y}], dash? }]; a null y leaves a gap (actual history stops where
+ * the projection starts). refs: horizontal reference lines [{ y, label }] such as a target; marks: vertical
+ * markers [{ i, label }] such as "Today" or a deadline.
+ */
+function lineChart(el, { series, height = 250, fmtX = (x) => x, fmtTip, refs = [], marks = [] }) {
   const draw = () => {
-    const W = el.clientWidth || 700, H = height, L = 52, R = 12, T = 8, B = 26, n = series[0]?.points.length || 0;
+    const W = el.clientWidth || 700, H = height, L = 52, R = 12, T = refs.length || marks.length ? 18 : 8, B = 26, n = series[0]?.points.length || 0;
     if (n < 2) { el.innerHTML = '<p class="empty">Not enough history yet.</p>'; return; }
-    const ys = series.flatMap((s) => s.points.map((p) => p.y));
+    const ys = [...series.flatMap((s) => s.points.map((p) => p.y)).filter((v) => v != null), ...refs.map((r) => r.y)];
     const { ticks, min, max } = niceTicks(Math.min(0, ...ys), Math.max(0, ...ys));
     const x = (i) => L + ((W - L - R) * i) / (n - 1), y = (v) => T + (H - T - B) * (1 - (v - min) / (max - min || 1));
-    const paths = series.map((s) => `<path d="${s.points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p.y).toFixed(1)}`).join('')}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`).join('');
-    el.innerHTML = `<svg width="${W}" height="${H}" role="img">${gridY(ticks, y, L, W, R)}${xLabels(n, x, (i) => fmtX(series[0].points[i].x), W).replaceAll('__Y__', H - 6)}${paths}
+    const line = (s) => { let d = '', pen = false; s.points.forEach((p, i) => { if (p.y == null) { pen = false; return; } d += `${pen ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p.y).toFixed(1)}`; pen = true; }); return d; };
+    const paths = series.map((s) => `<path d="${line(s)}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"${s.dash ? ' stroke-dasharray="6 5"' : ''}/>`).join('');
+    const refLines = refs.map((r) => `<line x1="${L}" x2="${W - R}" y1="${y(r.y)}" y2="${y(r.y)}" stroke="var(--text2)" stroke-width="1.5" stroke-dasharray="2 4"/><text x="${W - R}" y="${y(r.y) - 5}" text-anchor="end" style="fill:var(--text2)">${esc(r.label)}</text>`).join('');
+    const markLines = marks.filter((m) => m.i >= 0 && m.i < n).map((m) => `<line x1="${x(m.i)}" x2="${x(m.i)}" y1="${T - 4}" y2="${H - B}" stroke="var(--muted)" stroke-width="1"/><text x="${x(m.i)}" y="${T - 7}" text-anchor="${x(m.i) > W - 60 ? 'end' : 'middle'}">${esc(m.label)}</text>`).join('');
+    el.innerHTML = `<svg width="${W}" height="${H}" role="img">${gridY(ticks, y, L, W, R)}${xLabels(n, x, (i) => fmtX(series[0].points[i].x), W).replaceAll('__Y__', H - 6)}${markLines}${refLines}${paths}
       <line id="cx" y1="${T}" y2="${H - B}" stroke="var(--muted)" stroke-dasharray="3 3" style="display:none"/><g id="dots"></g><rect x="${L}" y="0" width="${W - L - R}" height="${H}" fill="transparent" id="hit"/></svg>`;
     const svg = $('svg', el), hit = $('#hit', el);
     hit.onmousemove = (e) => {
       const r = svg.getBoundingClientRect(), i = Math.max(0, Math.min(n - 1, Math.round(((e.clientX - r.left - L) / (W - L - R)) * (n - 1))));
       const cx = $('#cx', el); cx.style.display = ''; cx.setAttribute('x1', x(i)); cx.setAttribute('x2', x(i));
-      $('#dots', el).innerHTML = series.map((s) => `<circle cx="${x(i)}" cy="${y(s.points[i].y)}" r="4" fill="${s.color}" stroke="var(--surface)" stroke-width="2"/>`).join('');
-      showTip(`<b>${esc(fmtX(series[0].points[i].x))}</b>` + series.map((s) => `<div class="r"><span><span class="sw" style="background:${s.color}"></span>${esc(s.name)}</span><span>${(fmtTip || money)(s.points[i].y)}</span></div>`).join(''), e);
+      const here = series.filter((s) => s.points[i].y != null);
+      $('#dots', el).innerHTML = here.map((s) => `<circle cx="${x(i)}" cy="${y(s.points[i].y)}" r="4" fill="${s.color}" stroke="var(--surface)" stroke-width="2"/>`).join('');
+      showTip(`<b>${esc(fmtX(series[0].points[i].x))}</b>` + here.map((s) => `<div class="r"><span><span class="sw" style="background:${s.color}"></span>${esc(s.name)}</span><span>${(fmtTip || money)(s.points[i].y)}</span></div>`).join(''), e);
     };
     hit.onmouseleave = () => { hideTip(); $('#cx', el).style.display = 'none'; $('#dots', el).innerHTML = ''; };
   };
@@ -185,10 +195,10 @@ const ICONS = {
   overview: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
   spending: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>', assets: '<path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>',
   liabilities: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>', transactions: '<path d="M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4"/>',
-  review: '<path d="M4 6l2 2 3-3M4 14l2 2 3-3M12 7h8M12 15h8"/>', categories: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1"/>',
+  goals: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/>', review: '<path d="M4 6l2 2 3-3M4 14l2 2 3-3M12 7h8M12 15h8"/>', categories: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1"/>',
   chat: '<path d="M21 12a8 8 0 0 1-11.5 7.2L4 20l1-4.4A8 8 0 1 1 21 12z"/>', rules: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10M6 12h10"/>', banks: '<path d="M3 10l9-6 9 6M5 10v8M10 10v8M14 10v8M19 10v8M3 20h18"/>', connections: '<path d="M9 7V3M15 7V3M7 7h10v5a5 5 0 0 1-10 0zM12 17v4"/>', security: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>', backups: '<path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/>', import: '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>', sync: '<path d="M21 12a9 9 0 0 1-15 6.7L3 16M3 12a9 9 0 0 1 15-6.7L21 8M3 21v-5h5M21 3v5h-5"/>',
 };
-const NAV = [['overview', 'Overview'], ['spending', 'Spending'], ['assets', 'Assets'], ['liabilities', 'Liabilities'], ['transactions', 'Transactions'], ['import', 'Import'], ['review', 'Review']];
+const NAV = [['overview', 'Overview'], ['spending', 'Spending'], ['goals', 'Goals'], ['assets', 'Assets'], ['liabilities', 'Liabilities'], ['transactions', 'Transactions'], ['import', 'Import'], ['review', 'Review']];
 const SETTINGS = [['categories', 'Categories'], ['rules', 'Rules'], ['banks', 'Banks'], ['backups', 'Backups'], ['connections', 'Connections'], ['chat', 'Chat with AI'], ['security', 'Security']];
 const ico = (k) => `<svg viewBox="0 0 24 24">${ICONS[k]}</svg>`;
 

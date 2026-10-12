@@ -66,3 +66,28 @@ test('Review: suggestions on the sample data, and "accept all" creates the rules
   assert.throws(() => core.assignMerchants([{ merchant: 'x', category: 'not a category' }]), /Category must look like/);
   require('../lib/demo').clear();
 });
+
+test('goals: needed monthly amount matches the savings formula, with and without growth', () => {
+  const G = require('../lib/goals');
+  assert.equal(G.needed(0, 1200, 12, 0), 100);
+  const n = G.needed(4400.88, 250000, 159, 0.005); // 6% a year
+  let v = 4400.88; for (let k = 0; k < 159; k++) v = v * 1.005 + n;
+  assert.ok(Math.abs(v - 250000) < 0.01, `ends at ${v}`);
+});
+test('goals: progress from the real balance, projection at your pace, status and chart points', async () => {
+  const G = require('../lib/goals');
+  store.saveTxs({}); store.saveAccounts({}); require('../lib/demo').clear();
+  const t = today(), m = (k) => shiftDays(t, -30 * k);
+  store.saveAccounts({ a: { name: 'savings', label: 'Savings', currency: 'EUR', imported: true, opening: { date: m(8), amount: 1000, cur: 'EUR' } } });
+  store.saveTxs(Object.fromEntries([1, 2, 3, 4, 5, 6, 7].map((k) => ['s' + k, { acct: 'assets:bank:savings', date: m(k), amount: 500, cur: 'EUR', desc: 'TRANSFER IN', text: 'TRANSFER IN' }])));
+  const far = `${+t.slice(0, 4) + 3}-12-31`;
+  const g = G.create({ name: 'Trip', target: 10000, by: far, source: 'acct:assets:bank:savings' });
+  const r = G.list().goals.find((x) => x.id === g.id);
+  assert.equal(r.current, 4500); assert.equal(r.pct, 45); assert.ok(r.pace > 400 && r.pace <= 500, `pace ${r.pace}`);
+  assert.equal(r.status, 'on_track'); assert.ok(r.reachDate < far.slice(0, 7));
+  assert.ok(r.points.some((p) => p.actual != null) && r.points.some((p) => p.projected != null && p.actual == null) && r.points.some((p) => p.needed != null));
+  G.update(g.id, { monthly: 0 }); assert.equal(G.list().goals.find((x) => x.id === g.id).status, 'not_reachable');
+  G.update(g.id, { target: 3000 }); assert.equal(G.list().goals.find((x) => x.id === g.id).status, 'reached');
+  assert.throws(() => G.update(g.id, { by: '2001-01-01' }), /future/); assert.throws(() => G.create({ name: 'x', target: -5 }), /above 0/); assert.throws(() => G.update(g.id, { source: 'nope' }), /Unknown balance/);
+  G.remove(g.id); assert.ok(!G.list().goals.some((x) => x.id === g.id));
+});
