@@ -21,6 +21,7 @@ test('the bundle is one self-contained script that needs only Node built-ins', (
   for (const n of new Set(required)) assert.ok(builtins.has(n), `${n} is not a Node built-in; the packaged app could not load it`);
   assert.doesNotThrow(() => new vm.Script(src), 'syntax');
   assert.ok(!src.includes('node_modules'), 'no third-party code is bundled');
+  assert.ok(!/^#!/m.test(src), 'no shebang line survives, including from CRLF checkouts');
 });
 test('the bundler refuses dynamic requires instead of producing a build that breaks at runtime', () => {
   for (const bad of ["const n = 'x'; require('./' + n);", "require(name);", "require(`./${x}`);", "require( './a' + b )"]) {
@@ -42,7 +43,7 @@ test('macOS layout: a valid .app bundle (executable, icon, Info.plist that match
   const l = layout('darwin', 'arm64', path.join(tmp, 'm'), fakeBin);
   assert.equal(l.name, `Pennystead-${version}-macos-arm64.zip`);
   const app = path.join(l.dir, 'Pennystead.app', 'Contents'); assert.ok(exists(app, 'MacOS', 'Pennystead')); assert.ok(exists(app, 'Resources', 'Pennystead.icns'));
-  assert.ok(fs.statSync(path.join(app, 'MacOS', 'Pennystead')).mode & 0o111, 'executable bit');
+  if (process.platform !== 'win32') assert.ok(fs.statSync(path.join(app, 'MacOS', 'Pennystead')).mode & 0o111, 'executable bit'); // Windows has no mode bits
   const plist = fs.readFileSync(path.join(app, 'Info.plist'), 'utf8');
   assert.ok(!plist.includes('__VERSION__')); assert.ok(plist.includes(`<string>${version}</string>`)); assert.match(plist, /<key>CFBundleExecutable<\/key><string>Pennystead<\/string>/); assert.match(plist, /<key>CFBundleIconFile<\/key><string>Pennystead<\/string>/);
   assert.equal((plist.match(/<key>/g) || []).length, (plist.match(/<(string|true|false)\b/g) || []).length, 'every key has a value (well-formed plist)');
@@ -50,7 +51,8 @@ test('macOS layout: a valid .app bundle (executable, icon, Info.plist that match
 test('Linux layout: binary, installer, desktop entry with a quoted Exec, icon', () => {
   const l = layout('linux', 'x64', path.join(tmp, 'l'), fakeBin);
   assert.equal(l.name, `Pennystead-${version}-linux-x64.tar.gz`); for (const f of ['pennystead', 'install.sh', 'pennystead.desktop', 'icon.png', 'README.txt']) assert.ok(exists(l.dir, f), f);
-  assert.ok(fs.statSync(path.join(l.dir, 'install.sh')).mode & 0o111); assert.match(fs.readFileSync(path.join(l.dir, 'pennystead.desktop'), 'utf8'), /^Exec="__EXEC__"$/m);
+  if (process.platform !== 'win32') assert.ok(fs.statSync(path.join(l.dir, 'install.sh')).mode & 0o111);
+  assert.match(fs.readFileSync(path.join(l.dir, 'pennystead.desktop'), 'utf8'), /^Exec="__EXEC__"$/m);
 });
 test('icons exist in every format the installers reference', () => {
   for (const f of ['icon.png', 'windows/icon.ico', 'macos/Pennystead.icns']) assert.ok(fs.statSync(path.join(ROOT, 'packaging', f)).size > 1000, f);

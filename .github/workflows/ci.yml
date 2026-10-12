@@ -27,9 +27,9 @@ jobs:
           if docker run --rm pennystead:ci; then echo "should have refused"; exit 1; fi
       - name: Runs with a password, and the API is locked
         run: |
-          docker run -d --name h -p 127.0.0.1:3456:3456 -e PENNYSTEAD_PASSWORD=ci-password-123 pennystead:ci
+          docker run -d --name pennystead-ci -p 127.0.0.1:3456:3456 -e PENNYSTEAD_PASSWORD=ci-password-123 pennystead:ci
           for i in $(seq 1 30); do curl -sf http://localhost:3456/api/ping && break; sleep 1; done
           curl -sf http://localhost:3456/api/ping
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3456/api/state)" = 401
-          test "$(docker inspect --format '{{.State.Health.Status}}' h)" != "unhealthy"
-          docker logs h
+          test "$(docker inspect --format '{{.State.Health.Status}}' pennystead-ci)" != "unhealthy"
+          docker logs pennystead-ci

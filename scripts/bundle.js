@@ -16,7 +16,7 @@ function bundle(entry = path.join(ROOT, 'main.js'), { version } = {}) {
   const visit = (file) => {
     if (mods.has(file)) return;
     const raw = fs.readFileSync(file, 'utf8');
-    let code = file.endsWith('.json') ? `module.exports = ${raw};` : raw.replace(/^#!.*\n/, '');
+    let code = file.endsWith('.json') ? `module.exports = ${raw};` : raw.replace(/^#![^\r\n]*\r?\n/, '');
     const deps = {};
     if (!file.endsWith('.json')) {
       // Every require( must be exactly one string literal. Anything else (variables, concatenation) works from source but would break
