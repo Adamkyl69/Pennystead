@@ -186,3 +186,11 @@ test('Chat with AI: the config shown to the user points at this app and is valid
   assert.match(c.claudeCode, /^claude mcp add pennystead -- /);
   assert.ok(!/key|secret|password/i.test(r.body.replace(/pennystead-test-[^"\\]*/g, '')), 'no credentials in the config');
 });
+
+test('the web app manifest is public (browsers fetch it without the login cookie) and the window preference saves', async () => {
+  const m = await raw(port, { url: '/manifest.webmanifest' });
+  assert.equal(m.status, 200); assert.match(m.headers['content-type'], /manifest\+json/); assert.equal(JSON.parse(m.body).display, 'standalone');
+  assert.equal((await post(port, '/api/window', { mode: 'nope' })).status, 400);
+  assert.equal(JSON.parse((await post(port, '/api/window', { mode: 'browser' })).body).mode, 'browser');
+  assert.equal(JSON.parse((await post(port, '/api/window', { mode: 'app' })).body).mode, 'app');
+});

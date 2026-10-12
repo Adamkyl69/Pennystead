@@ -19,6 +19,7 @@ Usage: pennystead [options]
   --port <n>        Port to listen on (default 3456)
   --data-dir <dir>  Where your data is stored
   --no-browser      Do not open the browser on start
+  --browser-tab     Open in a normal browser tab instead of Pennystead's own window
   --host <addr>     Listen address (default 127.0.0.1). Anything else requires a password.
   --version         Print the version
 
@@ -33,10 +34,17 @@ const VERSION = require('./lib/version');
 if (flag('--version')) { console.log(VERSION); process.exit(0); }
 
 const { spawn } = require('child_process');
-function openBrowser(url) {
-  if (flag('--no-browser') || process.env.PENNYSTEAD_NO_BROWSER === '1') return;
+function openDefault(url) {
   const [cmd, a] = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
   try { spawn(cmd, a, { stdio: 'ignore', detached: true }).on('error', () => {}).unref(); } catch { /* no browser available: the URL is printed below */ }
+}
+function openBrowser(url) {
+  if (flag('--no-browser') || process.env.PENNYSTEAD_NO_BROWSER === '1') return;
+  // Its own window (Settings → Security → Window), unless the user prefers a normal browser tab.
+  const wantApp = !flag('--browser-tab') && require('./lib/config').loadConfig().window !== 'browser';
+  const app = wantApp ? require('./lib/window').appCommand(url) : null;
+  if (!app) return openDefault(url);
+  try { spawn(app[0], app[1], { stdio: 'ignore', detached: true }).on('error', () => openDefault(url)).unref(); } catch { openDefault(url); }
 }
 
 (async () => {

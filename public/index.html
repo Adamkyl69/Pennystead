@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pennystead</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#101113">
 <style>
 :root{color-scheme:dark;
   --bg:#0c0d0e;--side:#101113;--card:#151618;--card2:#1a1b1e;--line:#25272b;--text:#f0efec;--text2:#c3c2b7;--muted:#8a8b90;--accent:#3987e5;--btn:#2a6fc4;
@@ -60,7 +62,7 @@ tr.click{cursor:pointer}tr.click:hover td{background:var(--card2)}
 text{fill:var(--muted);font-size:11px}
 #tip{position:fixed;pointer-events:none;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;z-index:50;display:none;box-shadow:0 6px 24px #0006;min-width:140px}
 #tip b{font-weight:600}#tip .r{display:flex;justify-content:space-between;gap:16px;color:var(--text2)}
-.banner{display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid var(--line);background:var(--card);border-radius:9px;padding:9px 14px;margin-bottom:12px;font-size:13px;color:var(--text2)}
+.banner{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;border:1px solid var(--line);background:var(--card);border-radius:9px;padding:9px 14px;margin-bottom:12px;font-size:13px;color:var(--text2)}
 .banner a{color:var(--text);cursor:pointer;font-weight:500}
 .tabs{display:flex;justify-content:space-between;margin-bottom:10px;align-items:center}
 .empty{color:var(--muted);padding:12px 0}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}

@@ -232,6 +232,7 @@ async function go() {
   // Each navigation renders into its own container: if an older page finishes loading late, it writes into a detached one.
   const host = document.createElement('div');
   $('#page').replaceChildren(host);
+  setTimeout(() => { if (!host.childNodes.length) host.innerHTML = '<p class="empty" aria-live="polite">Loading…</p>'; }, 250);
   try { await page.render(host, { from }); } catch (e) { console.error(e); host.innerHTML = `<div class="card bad">${esc(e.message)}</div>`; }
 }
 // Rows that navigate use data-goto (inline event handlers are blocked by the Content-Security-Policy).

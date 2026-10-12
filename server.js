@@ -3,7 +3,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { paths, DATA_DIR, PACKAGED, loadConfig, writeAtomic } = require('./lib/config');
+const { paths, DATA_DIR, PACKAGED, loadConfig, writeAtomic, saveConfig } = require('./lib/config');
 const { eb, configured } = require('./lib/eb');
 const { sync } = require('./lib/sync');
 const { updatePrices } = require('./lib/prices');
@@ -73,7 +73,7 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
         return json(res, 200, { ok: true }, { 'Set-Cookie': auth.setCookie(auth.newSession()) });
       }
       if (P === '/api/logout' && METHOD === 'POST') { auth.logout(req); return json(res, 200, {}, { 'Set-Cookie': auth.clearCookie() }); }
-      const PUBLIC_FILES = ['/login', '/login.js', '/favicon.svg'];
+      const PUBLIC_FILES = ['/login', '/login.js', '/favicon.svg', '/manifest.webmanifest'];
       if (PUBLIC_FILES.includes(P)) {
         const a = assets.get(P === '/login' ? 'login.html' : P);
         return a ? send(res, 200, a.body, a.type) : send(res, 404, 'Not found', 'text/plain');
@@ -138,6 +138,10 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
         const entry = { command, args, ...(env ? { env } : {}) };
         const q = (x) => (/[\s"]/.test(x) ? `"${x.replace(/"/g, '\\"')}"` : x);
         return json(res, 200, { command, args, desktop: JSON.stringify({ mcpServers: { pennystead: entry } }, null, 2), claudeCode: `claude mcp add pennystead -- ${[command, ...args].map(q).join(' ')}`, dataDir: DATA_DIR });
+      }
+      if (P === '/api/window') {
+        if (METHOD === 'POST') { const { mode } = await readBody(req); if (!['app', 'browser'].includes(mode)) throw HttpError(400, 'mode must be "app" or "browser"'); const c = loadConfig(); c.window = mode; saveConfig(c); }
+        return json(res, 200, { mode: loadConfig().window, browser: require('./lib/window').find()?.name || null });
       }
       if (P === '/api/autostart') { if (METHOD === 'POST') return json(res, 200, autostart.set((await readBody(req)).enabled)); return json(res, 200, autostart.status()); }
 

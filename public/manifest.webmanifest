@@ -1,0 +1,11 @@
+{
+  "name": "Pennystead",
+  "short_name": "Pennystead",
+  "description": "Your private personal-finance dashboard",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0c0d0e",
+  "theme_color": "#101113",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

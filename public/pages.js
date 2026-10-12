@@ -1,4 +1,11 @@
 // ---------- Overview ----------
+/** "Prices are 12 days old" warning. On the Assets page it updates in place; elsewhere it links there. */
+function staleBanner(w, id) {
+  const s = w.stalePrices || [];
+  if (!s.length) return '';
+  const list = s.slice(0, 4).map((x) => `${esc(x.commodity)} (${x.days} days)`).join(', ') + (s.length > 4 ? ` and ${s.length - 4} more` : '');
+  return `<div class="banner"><span class="warn">Old prices, so these values may be off: ${list}</span>${id ? `<a id="${id}">Update prices</a>` : '<a href="#/assets">Update prices →</a>'}</div>`;
+}
 const ov = { range: '1Y', flow: 12, tab: 'month' };
 pages.overview = {
   title: 'Overview',
@@ -13,6 +20,7 @@ pages.overview = {
     const tabs = { month: 'This month', recent: 'Recent transactions', accounts: `Accounts` };
     el.innerHTML = `
       ${ST.reviewCount ? `<div class="banner"><span>${ST.reviewCount} item${ST.reviewCount === 1 ? '' : 's'} need your review (unknown merchants, unusual charges)</span><a href="#/review">Review →</a></div>` : ''}
+      ${staleBanner(w)}
       <div class="kpis">
         ${kpi('Net worth', money(w.netWorth), `Illiquid ${money(w.illiquid)}`, `${parts || 'No illiquid assets'}${w.secured ? `, minus ${money(w.secured)} secured debt` : ''}`)}
         ${kpi('Liquid net worth', money(w.liquid), `Cash ${money(w.cash)} · investments ${money(w.investmentsValue + w.liquidManual)}`, w.unsecured ? `After ${money(w.unsecured)} owed` : 'No unsecured debt')}
@@ -223,12 +231,13 @@ pages.assets = {
     el.innerHTML = `
       <div class="kpis">${kpi('Total assets', money(totalAssets), `${assets.filter((a) => !a.closed).length} manual · ${cashRows.length} cash accounts · ${inv.length} holdings`)}${kpi('Liquid', money(w.cash + w.investmentsValue + w.liquidManual), 'Cash, investments, liquid assets')}${kpi('Illiquid', money(w.illiquidAssets), w.illiquidParts.map((p) => `${esc(p.name)} ${money(p.value)}`).join(', ') || '—')}</div>
       ${w.unpriced.length ? `<div class="banner"><span class="warn">No price/FX rate for: ${esc(w.unpriced.join(', '))}</span><a id="px1">Update prices</a></div>` : ''}
+      ${staleBanner(w, 'px2')}
       ${card('Cash &amp; bank accounts', 'Synced from your bank, plus foreign-currency cash from config', `<div class="tbl" style="margin:0"><table><tbody>${cashRows.map((a) => `<tr><td>${esc(acctName[a.account] || (a.account.startsWith('assets:cash:') ? a.account.split(':').pop().toUpperCase() + ' cash' : a.account.split(':').slice(1).join(' › ')))}</td><td class="n">${money(a.value)}</td></tr>`).join('') || '<tr><td class="empty">No accounts yet.</td></tr>'}</tbody></table></div>`)}
       ${card('Investments', 'Stocks and funds from config.json holdings, valued at the latest price', inv.length ? `<div class="tbl" style="margin:0"><table><thead><tr><th>Holding</th><th class="n">Qty</th><th class="n">Value</th><th class="n">Cost</th><th class="n">Gain</th></tr></thead><tbody>${inv.map((x) => `<tr><td>${esc(x.symbol)}</td><td class="n">${x.qty}</td><td class="n">${money(x.value)}</td><td class="n muted">${money(x.cost)}</td><td class="n ${x.pl >= 0 ? 'good' : 'bad'}">${money(x.pl, BASE, { sign: true })}${x.plPct != null ? ` (${pct(x.plPct)})` : ''}</td></tr>`).join('')}<tr><td><b>Total</b></td><td></td><td class="n"><b>${money(invTotal)}</b></td><td class="n muted">${money(invCost)}</td><td class="n ${invTotal >= invCost ? 'good' : 'bad'}"><b>${money(invTotal - invCost, BASE, { sign: true })}</b></td></tr></tbody></table></div>` : '<p class="empty">No holdings yet. Add them under <code>holdings</code> in data/config.json.</p>', `<button class="btn" id="px">Update prices</button>`)}
       ${card('Manual assets', 'Property, vehicles, pension, crypto wallets… record a value whenever you like. History builds your net worth chart.', manualForm('asset') + manualTable(assets, 'asset'), '<button class="btn primary" id="addBtn">+ Add asset</button>')}`;
     wireManual(el, 'asset');
     const px = async () => { const r = await run(() => api('/api/prices', 'POST')); toast(r.errors?.length ? r.errors[0] : `Updated ${r.updated.length} prices`); go(); };
-    $('#px', el).onclick = px; if ($('#px1', el)) $('#px1', el).onclick = px;
+    $('#px', el).onclick = px; for (const id of ['#px1', '#px2']) if ($(id, el)) $(id, el).onclick = px;
   },
 };
 
@@ -554,6 +563,20 @@ async function impRunPreview() {
   try { imp.pv = await api('/api/import/preview', 'POST', { importId: imp.d.importId, mapping: imp.mapping, account: impAccountBody(), options: impOptions() }); imp.step = 'preview'; go(); } catch (e) { toast(e.message); }
 }
 
+/** Warnings about guesses the file could not settle, and a cross-check against the file's own Balance column. */
+function impChecks(p) {
+  const out = [], a = p.ambiguous || {}, bc = p.balanceCheck;
+  const other = p.decimal === ',' ? '1,234.56 (dot decimal)' : '1.234,56 (comma decimal)';
+  if (a.decimal) out.push(`<div class="banner"><span class="warn">Amounts like <b>12.500</b> could mean twelve and a half or twelve thousand five hundred. We read them as <b>${p.decimal === ',' ? '1.234,56' : '1,234.56'}</b>.</span><span class="row"><button class="btn sm" data-fix="keepDecimal">That's right</button><button class="btn sm" data-fix="decimal">Use ${other}</button></span></div>`);
+  if (a.date) out.push(`<div class="banner"><span class="warn">Every date in this file works both ways (03/04 is 3 April or March 4). We read them <b>${p.dateOrder === 'MDY' ? 'month first' : 'day first'}</b>, because that keeps the statement in one period.</span><span class="row"><button class="btn sm" data-fix="keepDate">That's right</button><button class="btn sm" data-fix="date">Use ${p.dateOrder === 'MDY' ? 'day' : 'month'} first</button></span></div>`);
+  if (bc && !bc.ok) {
+    const fix = { flip: '<button class="btn sm" data-fix="flip">Flip signs</button>', decimal: '<button class="btn sm" data-fix="decimal">Switch number format</button>' }[bc.hint] || '';
+    const why = { flip: 'Money in and out look swapped.', decimal: 'The decimal separator looks wrong (amounts are off by 1,000×).', check: 'Check that the amount column (or debit/credit columns) is the right one.' }[bc.hint];
+    out.push(`<div class="banner"><span class="bad">The file's Balance column does not follow the amounts in ${bc.pairs - bc.matching} of ${bc.pairs} rows. ${why}</span>${fix}</div>`);
+  } else if (bc?.ok) out.push(`<p class="muted" style="margin:0 0 12px;font-size:13px"><span class="good">✓</span> Amounts match the file's own Balance column (${bc.matching} of ${bc.pairs} rows).</p>`);
+  return out.join('');
+}
+
 function impPreview(el) {
   const p = imp.pv, c = p.counts, cur = p.account.currency;
   const chip = (n, label, cls = '') => (n ? `<span class="pill ${cls}" style="margin-right:6px">${n} ${label}</span>` : '');
@@ -564,6 +587,7 @@ function impPreview(el) {
       ${kpi('Money in', money(p.totals.in, cur), '', '', 'good')}
       ${kpi('Money out', money(p.totals.out, cur), '', '', '')}
       ${kpi('Detected', `${p.decimal === ',' ? '1.234,56' : '1,234.56'}`, `dates: ${p.dateOrder === 'MDY' ? 'month first' : 'day first'}`, '')}</div>
+    ${impChecks(p)}
     <div class="card"><div style="margin-bottom:8px">${chip(c.new, 'new', 'good')}${chip(c.duplicate, 'duplicates (already in your data, skipped)')}${chip(c.possible_duplicate, 'possible duplicates', 'warn')}${chip(c.overlap, 'overlap the bank-synced period', 'warn')}${chip(c.errors, 'rows with problems (skipped)', 'bad')}${chip(c.blank, 'blank rows ignored')}</div>
       ${c.possible_duplicate ? `<label class="chk row" style="margin:6px 0"><input type="checkbox" id="oPoss" ${imp.opts.includePossible ? 'checked' : ''}> Also import the ${c.possible_duplicate} possible duplicate(s) (same date and amount as an existing transaction, different text)</label>` : ''}
       ${c.overlap ? `<label class="chk row" style="margin:6px 0"><input type="checkbox" id="oOver" ${imp.opts.includeOverlap ? 'checked' : ''}> Also import the ${c.overlap} row(s) that fall inside the period your bank already syncs</label>` : ''}
@@ -574,6 +598,16 @@ function impPreview(el) {
     <div class="row" style="margin-bottom:24px"><button class="btn primary" id="commit" ${c.toImport ? '' : 'disabled'}>Import ${c.toImport} transaction${c.toImport === 1 ? '' : 's'}</button><button class="btn" id="back2">Back</button></div>`;
   $('#back', el).onclick = $('#back2', el).onclick = () => { imp.d.mapping = { ...imp.mapping }; imp.step = 'map'; go(); };
   $('#restart', el).onclick = () => { Object.assign(imp, { step: 'upload', d: null, pv: null }); go(); };
+  // One-click fixes from the checks above. The choice becomes part of the mapping, which is saved for this bank's files.
+  $$('[data-fix]', el).forEach((b) => (b.onclick = () => {
+    const f = b.dataset.fix, m = imp.mapping;
+    if (f === 'decimal') m.decimal = p.decimal === ',' ? '.' : ',';
+    if (f === 'keepDecimal') m.decimal = p.decimal;
+    if (f === 'date') m.dateFormat = p.dateOrder === 'MDY' ? 'DMY' : 'MDY';
+    if (f === 'keepDate') m.dateFormat = p.dateOrder;
+    if (f === 'flip') m.invert = !m.invert;
+    impRunPreview();
+  }));
   if ($('#oPoss', el)) $('#oPoss', el).onchange = (e) => { imp.opts.includePossible = e.target.checked; impRunPreview(); };
   if ($('#oOver', el)) $('#oOver', el).onchange = (e) => { imp.opts.includeOverlap = e.target.checked; impRunPreview(); };
   $('#commit', el).onclick = async (e) => {
@@ -644,19 +678,21 @@ pages.connections = {
 pages.security = {
   title: 'Security',
   async render(el) {
-    const [a, auto] = await Promise.all([api('/api/auth/status'), api('/api/autostart')]);
+    const [a, auto, win] = await Promise.all([api('/api/auth/status'), api('/api/autostart'), api('/api/window')]);
     el.innerHTML = `
       ${card('Password', a.required ? '<span class="good">A password is required to open Pennystead.</span>' : 'Pennystead is only reachable from this computer. A password adds protection if other people can use it.', `
         <form id="pwForm" class="form" style="max-width:640px">${a.required ? '<label>Current password<input type="password" name="current" required autocomplete="current-password"></label>' : ''}
           <label>${a.required ? 'New password' : 'Choose a password'} (8+ characters)<input type="password" name="password" minlength="8" autocomplete="new-password"></label>
           <div class="row"><button class="btn primary">${a.required ? 'Change password' : 'Set password'}</button>${a.required ? '<button type="button" class="btn danger" id="pwOff">Remove password</button>' : ''}</div></form>
         <p class="muted" style="font-size:12px;margin:10px 0 0">Passwords are stored as a salted hash. Five wrong attempts lock sign-in for 15 minutes. If you forget it, delete <code>auth.json</code> from your data folder while Pennystead is closed.</p>`)}
+      ${card('Window', win.browser ? `Pennystead opens in its own window using ${esc(win.browser)}, without tabs or an address bar.` : 'Pennystead opens in its own window when Google Chrome, Microsoft Edge or Brave is installed. None was found, so it opens in your default browser.', `<label class="chk row"><input type="checkbox" id="win" ${win.mode !== 'browser' ? 'checked' : ''}> Open in its own window</label>`)}
       ${card('Start with my computer', auto.supported ? 'Open Pennystead in the background when you sign in to your computer, so scheduled syncs and backups keep running.' : (auto.reason || 'Not available.'), auto.supported ? `<label class="chk row"><input type="checkbox" id="auto" ${auto.enabled ? 'checked' : ''}> Start Pennystead when I log in</label>` : '')}
       ${ST.packaged ? card('Quit Pennystead', 'Stops Pennystead completely. Scheduled syncs and backups run only while it is open.', '<button class="btn danger" id="quit">Quit Pennystead</button>') : ''}
       ${card('About', `Pennystead ${esc(ST.version)}`, `<div class="muted" style="font-size:13px;line-height:1.8">Your data is stored in <code>${esc(ST.dataDir || '')}</code>.<br>Pennystead listens only on this computer (port ${ST.port}). It contacts the internet only for the services you set up: your bank (via Enable Banking), Alpha Vantage prices, and Google Drive backups.</div>`)}`;
     $('#pwForm', el).onsubmit = async (e) => { e.preventDefault(); const f = e.target; try { await api('/api/auth/password', 'POST', { current: f.current?.value, password: f.password.value }); toast('Password saved'); go(); } catch (er) { toast(er.message); } };
     if ($('#pwOff', el)) $('#pwOff', el).onclick = async () => { const cur = prompt('Enter your current password to remove it:'); if (cur == null) return; try { await api('/api/auth/password', 'POST', { current: cur, password: null }); toast('Password removed'); go(); } catch (er) { toast(er.message); } };
     if ($('#quit', el)) $('#quit', el).onclick = async () => { if (!confirm('Quit Pennystead? You can start it again from your applications.')) return; try { await api('/api/quit', 'POST'); } catch { /* the server is gone */ } document.body.innerHTML = '<p style="font-family:system-ui;padding:40px;text-align:center">Pennystead has stopped. You can close this tab.</p>'; };
+    $('#win', el).onchange = async (e) => { try { await api('/api/window', 'POST', { mode: e.target.checked ? 'app' : 'browser' }); toast('Takes effect the next time you open Pennystead'); } catch (er) { toast(er.message); e.target.checked = !e.target.checked; } };
     if ($('#auto', el)) $('#auto', el).onchange = async (e) => { try { await api('/api/autostart', 'POST', { enabled: e.target.checked }); toast(e.target.checked ? 'Pennystead will start when you log in' : 'Start at login turned off'); } catch (er) { toast(er.message); e.target.checked = !e.target.checked; } };
   },
 };
