@@ -111,6 +111,7 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
       if (P === '/api/rules') { if (METHOD === 'PUT') return json(res, 200, core.setRules((await readBody(req)).rules)); return json(res, 200, loadConfig().rules); }
       if (P === '/api/budget' && METHOD === 'PUT') { const b = await readBody(req); core.setBudget(b.category, b.amount, b.period); return json(res, 200, {}); }
       if (P === '/api/override' && METHOD === 'POST') { const b = await readBody(req); core.setOverride(b.id, b.category); return json(res, 200, {}); }
+      if (P === '/api/review/assign-many' && METHOD === 'POST') return json(res, 200, core.assignMerchants((await readBody(req)).items));
       if (P === '/api/review/assign' && METHOD === 'POST') { const b = await readBody(req); core.assignMerchant(b.merchant, b.category); return json(res, 200, {}); }
 
       // ----- sample data (first run) -----
@@ -130,6 +131,7 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
         if (!PACKAGED && process.env.PENNYSTEAD_ALLOW_QUIT !== '1') throw HttpError(403, 'Quit is only available in the installed app.');
         json(res, 200, { ok: true }); setTimeout(() => process.exit(0), 200); return;
       }
+      if (P === '/api/mcp-prompts') return json(res, 200, require('./lib/prompts').list());
       if (P === '/api/mcp-config') {
         const custom = !!(process.env.PENNYSTEAD_DATA || process.env.DATA_DIR);
         const command = process.execPath, args = PACKAGED ? ['--mcp'] : [path.join(__dirname, 'mcp.js')];

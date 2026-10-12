@@ -8,6 +8,7 @@ const { loadConfig } = require('./lib/config');
 const manual = require('./lib/manual');
 const J = require('./lib/journal');
 const WRITE = process.env.MCP_WRITE === '1';
+const prompts = require('./lib/prompts');
 const { redact, mode } = require('./lib/redact');
 
 // Subcommands allowed through hledger_query (read-only) and flags that could read other files.
@@ -35,6 +36,7 @@ const tools = {
     },
   },
   subscriptions: { d: 'Detected recurring subscriptions and bills with price increases, duplicates, overlaps, lapsed ones and yearly cost.', s: {}, f: async () => A.subscriptions(await core.transactions(), core.today()) },
+  review_queue: { d: 'Merchants that are still uncategorized, with totals, Pennystead\'s suggested category and confidence, plus the list of existing categories.', s: {}, f: async () => { const r = await core.review(); return { merchants: r.merchants.map(({ name, count, total, dir, last, suggestion }) => ({ name, count, total, direction: dir, last, suggestion })), categories: r.categories.map((c) => c.account) }; } },
   anomalies: { d: 'Unusual charges: outsized amounts, first-time big merchants, duplicate charges, category spikes, price hikes.', s: {}, f: async () => { const t = await core.transactions(), td = core.today(); return A.anomalies(t, A.subscriptions(t, td), td, loadConfig().anomalyMin); } },
   ...(hledgerInstalled() ? { hledger_query: {
     d: 'Run a read-only hledger report, e.g. ["bal","expenses","-M","-X","EUR"] or ["reg","groceries","-p","last month"]. Disabled when REDACT=full.',
@@ -65,8 +67,10 @@ async function handle(msg) {
   const { id, method, params } = msg;
   if (id === undefined) return; // notification
   try {
-    if (method === 'initialize') return send({ jsonrpc: '2.0', id, result: { protocolVersion: params?.protocolVersion || '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'pennystead', version: require('./lib/version') }, instructions: 'Private personal finance data from Pennystead. Amounts: negative = money out. Base currency is in net_worth/overview.' } });
+    if (method === 'initialize') return send({ jsonrpc: '2.0', id, result: { protocolVersion: params?.protocolVersion || '2025-03-26', capabilities: { tools: {}, prompts: {} }, serverInfo: { name: 'pennystead', version: require('./lib/version') }, instructions: 'Private personal finance data from Pennystead. Amounts: negative = money out. Base currency is in net_worth/overview.' } });
     if (method === 'ping') return send({ jsonrpc: '2.0', id, result: {} });
+    if (method === 'prompts/list') return send({ jsonrpc: '2.0', id, result: { prompts: prompts.list() } });
+    if (method === 'prompts/get') return send({ jsonrpc: '2.0', id, result: prompts.get(params?.name, params?.arguments) });
     if (method === 'tools/list') return send({ jsonrpc: '2.0', id, result: { tools: Object.entries(tools).map(([name, t]) => ({ name, description: t.d, inputSchema: { type: 'object', properties: t.s }, annotations: { readOnlyHint: !t.write } })) } });
     if (method === 'tools/call') {
       const t = tools[params.name];

@@ -288,9 +288,10 @@ pages.review = {
   async render(el) {
     const r = await api('/api/review');
     const an = r.anomalies;
+    const sure = r.merchants.filter((m) => m.suggestion?.confidence >= 0.8); // "Accept all" only takes the confident ones
     el.innerHTML = `
-      ${card('Merchants to categorize', 'No rule matched these. Pick a category once and every matching transaction, past and future, follows.', r.merchants.length ? `<div class="tbl" style="margin:0"><table><thead><tr><th>Merchant</th><th class="n">Transactions</th><th class="n">Total</th><th>Last</th><th>Category</th><th></th></tr></thead><tbody>${r.merchants.map((m) => `<tr><td>${esc(m.name)}</td><td class="n">${m.count}</td><td class="n">${money(m.total)}</td><td class="muted">${esc(m.last)}</td>
-        <td><select data-m="${esc(m.merchant)}"><option value="">Choose…</option>${catOptions(r.categories.filter((c) => !c.account.endsWith(':uncategorized')), '', m.dir === 'in' ? 'income' : 'expense')}<option value="__new">＋ New category…</option></select></td><td class="n"><button class="btn sm primary" data-save="${esc(m.merchant)}">Apply</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="empty">Everything is categorized. 🎉</p>')}
+      ${card('Merchants to categorize', 'No rule matched these. Pick a category once and every matching transaction, past and future, follows. Suggestions are learned from what you have already categorized, on this computer.', r.merchants.length ? `<div class="tbl" style="margin:0"><table><thead><tr><th>Merchant</th><th class="n">Transactions</th><th class="n">Total</th><th>Last</th><th>Category</th><th></th></tr></thead><tbody>${r.merchants.map((m) => `<tr><td>${esc(m.name)}${m.suggestion ? `<div class="muted" style="font-size:12px">Suggested: ${esc(catLabel(m.suggestion.category))} · ${Math.round(m.suggestion.confidence * 100)}% sure · like ${esc(m.suggestion.because)}</div>` : ''}</td><td class="n">${m.count}</td><td class="n">${money(m.total)}</td><td class="muted">${esc(m.last)}</td>
+        <td><select data-m="${esc(m.merchant)}"><option value="">Choose…</option>${catOptions(r.categories.filter((c) => !c.account.endsWith(':uncategorized')), m.suggestion?.category || '', m.dir === 'in' ? 'income' : 'expense')}<option value="__new">＋ New category…</option></select></td><td class="n"><button class="btn sm primary" data-save="${esc(m.merchant)}">Apply</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="empty">Everything is categorized. 🎉</p>', sure.length ? `<button class="btn primary sm" id="acceptAll">Accept ${sure.length} suggestion${sure.length === 1 ? '' : 's'}</button>` : '')}
       ${card(`Unusual activity (${an.length})`, 'Large or odd charges, duplicates, spikes and price increases.', an.length ? an.map((x) => `<div class="an"><div class="row" style="justify-content:space-between"><span><span class="sw" style="background:${SEV[x.severity]};border-radius:50%"></span><b>${esc(ANOM[x.type])}</b> · ${esc(x.type === 'category_spike' ? catLabel(x.desc) : x.desc)}</span><span>${money2(x.amount)}</span></div><div class="muted" style="font-size:12px;margin-left:17px">${esc(x.date)} · ${esc(x.detail)}</div></div>`).join('') : '<p class="empty">Nothing unusual lately.</p>')}
       ${card('Subscriptions worth a second look', 'Price rises, duplicate charges, overlapping services and costly ones.', (() => { const f = r.subscriptions.active.filter((s) => s.flags.some((x) => x !== 'new')); return f.length ? `<div class="tbl" style="margin:0"><table><tbody>${f.map((s) => `<tr><td>${esc(s.merchant)}</td><td>${s.flags.map((x) => `<span class="pill ${x === 'duplicate_charge' ? 'bad' : 'warn'}" style="margin-right:4px">${esc(x.replace('_', ' '))}</span>`).join('')}</td><td class="n">${money2(s.amount)} / ${esc(s.period.replace('ly', ''))}</td><td class="n muted">${money(s.perYear)}/yr</td></tr>`).join('')}</tbody></table></div>` : '<p class="empty">No flags.</p>'; })())}`;
     $$('select[data-m]', el).forEach((s) => (s.onchange = () => {
@@ -300,6 +301,10 @@ pages.review = {
       const acct = name.includes(':') ? name.toLowerCase().replace(/\s+/g, '-') : `${s.closest('tr') && /income/.test(s.innerHTML) ? 'income' : 'expenses'}:${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
       const o = document.createElement('option'); o.value = acct; o.textContent = catLabel(acct); s.insertBefore(o, s.lastChild); s.value = acct;
     }));
+    if ($('#acceptAll', el)) $('#acceptAll', el).onclick = async () => {
+      if (!confirm(`Create rules for these ${sure.length} merchants?\n\n${sure.map((m) => `${m.name} → ${catLabel(m.suggestion.category)}`).join('\n')}`)) return;
+      await run(() => api('/api/review/assign-many', 'POST', { items: sure.map((m) => ({ merchant: m.merchant, category: m.suggestion.category })) }), `${sure.length} merchants categorized`); go();
+    };
     $$('[data-save]', el).forEach((b) => (b.onclick = async () => {
       const sel = $(`select[data-m="${CSS.escape(b.dataset.save)}"]`, el);
       if (!sel.value) return toast('Choose a category first');
@@ -629,12 +634,13 @@ function impDone(el) {
 pages.chat = {
   title: 'Chat with AI',
   async render(el) {
-    const c = await api('/api/mcp-config');
+    const [c, prompts] = await Promise.all([api('/api/mcp-config'), api('/api/mcp-prompts')]);
     el.innerHTML = `
       <p class="muted" style="margin:0 0 16px">Pennystead can answer questions about your money through Claude, using your own Claude Desktop or Claude Code. Claude runs a small Pennystead helper on this computer; nothing is sent anywhere until you ask Claude something, and then only the answers it needs go to Claude. Names, IBANs and long numbers are masked by default.</p>
       ${card('Claude Desktop', 'Open Claude Desktop → Settings → Developer → Edit Config, add this, save, and restart Claude Desktop. If the file already has "mcpServers", add just the "pennystead" entry inside it.', `<pre style="margin:0 0 10px;padding:12px;background:var(--card2);border-radius:8px;overflow:auto;font-size:12px">${esc(c.desktop)}</pre><button type="button" class="btn sm" data-copy="${esc(c.desktop)}">Copy</button>`)}
       ${card('Claude Code', 'Run this once in a terminal.', `<pre style="margin:0 0 10px;padding:12px;background:var(--card2);border-radius:8px;overflow:auto;font-size:12px">${esc(c.claudeCode)}</pre><button type="button" class="btn sm" data-copy="${esc(c.claudeCode)}">Copy</button>`)}
-      ${card('Try asking', '', '<ul class="muted" style="margin:0;padding-left:18px;line-height:1.8"><li>What is my net worth, and how has it changed this year?</li><li>Which subscriptions have gone up in price?</li><li>Did anything unusual happen in my spending last month?</li><li>Am I on track with my budgets?</li></ul>')}
+      ${card('Guided reviews', 'One click in Claude Desktop: open the + menu in a new chat, choose Pennystead, and pick a review. Claude fetches what it needs and writes it up.', `<div class="tbl" style="margin:0"><table><tbody>${prompts.map((p) => `<tr><td style="white-space:nowrap"><b>${esc(p.title)}</b></td><td class="muted">${esc(p.description)}</td></tr>`).join('')}</tbody></table></div>`)}
+      ${card('Or just ask', '', '<ul class="muted" style="margin:0;padding-left:18px;line-height:1.8"><li>What is my net worth, and how has it changed this year?</li><li>Which subscriptions have gone up in price?</li><li>Did anything unusual happen in my spending last month?</li><li>Am I on track with my budgets?</li></ul>')}
       <p class="muted" style="font-size:12px">Read-only by default. Add <code>--write</code> to the arguments to also let Claude record a new value for a manual asset (for example "my car is worth 15,500 now").</p>`;
   },
 };

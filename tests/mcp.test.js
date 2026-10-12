@@ -38,3 +38,19 @@ test('--mcp --write exposes record_valuation', async () => {
     assert.ok((await s.call('tools/list')).result.tools.some((t) => t.name === 'record_valuation'));
   } finally { s.close(); }
 });
+
+test('--mcp: guided reviews are offered as prompts, and the review queue tool carries suggestions', async () => {
+  const s = session();
+  try {
+    const init = await s.call('initialize', {});
+    assert.ok(init.result.capabilities.prompts, 'prompts capability is announced');
+    const names = (await s.call('prompts/list')).result.prompts.map((p) => p.name);
+    for (const n of ['monthly_review', 'find_savings', 'budget_checkup', 'net_worth_report', 'tidy_categories']) assert.ok(names.includes(n), n);
+    const got = (await s.call('prompts/get', { name: 'monthly_review', arguments: { month: '2026-03' } })).result;
+    assert.equal(got.messages[0].role, 'user'); assert.match(got.messages[0].content.text, /2026-03/); assert.match(got.messages[0].content.text, /2026-02/, 'compares with the month before');
+    assert.ok((await s.call('prompts/get', { name: 'nope' })).error, 'unknown prompt is an error');
+    const tools = (await s.call('tools/list')).result.tools.map((t) => t.name);
+    assert.ok(tools.includes('review_queue'));
+    for (const l of s.lines) JSON.parse(l);
+  } finally { s.close(); }
+});

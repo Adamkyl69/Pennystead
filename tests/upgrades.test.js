@@ -45,3 +45,24 @@ test('app window: finds an installed Chromium-family browser and opens the URL w
     process.env.PATH = path.join(dir, 'empty'); assert.equal(w.appCommand('http://x'), null, 'no browser: the default browser is used instead');
   } finally { process.env.PATH = saved; }
 });
+
+test('category suggestions learn from merchants you categorized, and stay quiet without real evidence', () => {
+  const S = require('../lib/suggest'), A = require('../lib/analysis');
+  const tx = (desc, category) => ({ desc, category, merchant: A.merchantKey(desc), amount: -20 });
+  const m = S.train([tx('LIDL HELSINKI', 'expenses:food:groceries'), tx('NESTE HELSINKI', 'expenses:transport:fuel'), tx('MOTONET ESPOO', 'expenses:transport'), tx('ACME SALARY', 'income:salary')]);
+  const lidl = S.suggest(m, 'LIDL 1234 VANTAA', -15);
+  assert.equal(lidl.category, 'expenses:food:groceries'); assert.ok(lidl.confidence >= 0.8); assert.equal(lidl.because, 'LIDL HELSINKI');
+  assert.equal(S.suggest(m, 'HELSINKI HOUSING LTD', -900), null, '"helsinki" points at two categories: not evidence');
+  assert.equal(S.suggest(m, 'TOTALLY NEW SHOP', -9), null, 'no shared words: no guess');
+  assert.equal(S.suggest(m, 'ACME BONUS', -50), null, 'money out is never given an income category');
+  assert.equal(S.suggest(m, 'MOTONET VANTAA', -30).category, 'expenses:transport');
+});
+test('Review: suggestions on the sample data, and "accept all" creates the rules in one go', async () => {
+  store.saveTxs({}); require('../lib/demo').generate();
+  const r = await core.review(), moto = r.merchants.find((m) => m.name === 'MOTONET VANTAA');
+  assert.equal(moto.suggestion.category, 'expenses:transport');
+  core.assignMerchants([{ merchant: moto.merchant, category: moto.suggestion.category }]);
+  assert.ok(!(await core.review()).merchants.some((m) => m.name === 'MOTONET VANTAA'));
+  assert.throws(() => core.assignMerchants([{ merchant: 'x', category: 'not a category' }]), /Category must look like/);
+  require('../lib/demo').clear();
+});

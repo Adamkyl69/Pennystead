@@ -139,8 +139,10 @@ Everything lives in `data/`, so backing up means copying it safely. *Settings â†
 
 ## Chat with your data (MCP)
 The installed app is its own MCP server: run `Pennystead --mcp` (add `--write` to allow recording valuations, `--data-dir <dir>` for a custom data folder). The easiest route is Settings â†’ **Chat with AI**, which shows the exact config for your install to paste into Claude Desktop, or a one-line command for Claude Code. From source: `node mcp.js` (Node 20+); it reads the same data folder as the app.
+**Guided reviews:** the server also offers MCP prompts, which Claude Desktop shows in its + menu under Pennystead: Monthly money review, Find money I am wasting, Budget check-up, Net worth report and Tidy up my categories.
+
 Read-only tools: `net_worth`, `net_worth_history`, `overview`, `manual_assets`, `monthly_summary`, `spending_by_category`,
-`budget_status`, `search_transactions`, `subscriptions`, `anomalies`, `hledger_query`.
+`budget_status`, `search_transactions`, `subscriptions`, `anomalies`, `review_queue`, `hledger_query`.
 Set `MCP_WRITE=1` to also expose `record_valuation` ("my car is worth 15,500 now"), which only writes `manual-assets.json`.
 
 **Privacy:** whatever the tools return is sent to your AI provider. `REDACT=light` (default) masks IBANs, emails and long
