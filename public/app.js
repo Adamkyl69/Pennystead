@@ -184,10 +184,10 @@ const ICONS = {
   spending: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>', assets: '<path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>',
   liabilities: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>', transactions: '<path d="M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4"/>',
   review: '<path d="M4 6l2 2 3-3M4 14l2 2 3-3M12 7h8M12 15h8"/>', categories: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1"/>',
-  rules: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10M6 12h10"/>', banks: '<path d="M3 10l9-6 9 6M5 10v8M10 10v8M14 10v8M19 10v8M3 20h18"/>', connections: '<path d="M9 7V3M15 7V3M7 7h10v5a5 5 0 0 1-10 0zM12 17v4"/>', security: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>', backups: '<path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/>', import: '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>', sync: '<path d="M21 12a9 9 0 0 1-15 6.7L3 16M3 12a9 9 0 0 1 15-6.7L21 8M3 21v-5h5M21 3v5h-5"/>',
+  chat: '<path d="M21 12a8 8 0 0 1-11.5 7.2L4 20l1-4.4A8 8 0 1 1 21 12z"/>', rules: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10M6 12h10"/>', banks: '<path d="M3 10l9-6 9 6M5 10v8M10 10v8M14 10v8M19 10v8M3 20h18"/>', connections: '<path d="M9 7V3M15 7V3M7 7h10v5a5 5 0 0 1-10 0zM12 17v4"/>', security: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>', backups: '<path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/>', import: '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>', sync: '<path d="M21 12a9 9 0 0 1-15 6.7L3 16M3 12a9 9 0 0 1 15-6.7L21 8M3 21v-5h5M21 3v5h-5"/>',
 };
 const NAV = [['overview', 'Overview'], ['spending', 'Spending'], ['assets', 'Assets'], ['liabilities', 'Liabilities'], ['transactions', 'Transactions'], ['import', 'Import'], ['review', 'Review']];
-const SETTINGS = [['categories', 'Categories'], ['rules', 'Rules'], ['banks', 'Banks'], ['backups', 'Backups'], ['connections', 'Connections'], ['security', 'Security']];
+const SETTINGS = [['categories', 'Categories'], ['rules', 'Rules'], ['banks', 'Banks'], ['backups', 'Backups'], ['connections', 'Connections'], ['chat', 'Chat with AI'], ['security', 'Security']];
 const ico = (k) => `<svg viewBox="0 0 24 24">${ICONS[k]}</svg>`;
 
 function renderSide(route) {

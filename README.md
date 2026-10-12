@@ -138,10 +138,7 @@ Everything lives in `data/`, so backing up means copying it safely. *Settings â†
   CLI: `node cli.js backup`, `node cli.js backups`, `node cli.js restore <file>`.
 
 ## Chat with your data (MCP)
-The MCP server runs from the source folder (`node mcp.js`, needs Node 20+); it reads the same data folder as the app. Add to Claude Desktop's config (absolute paths) or run `claude mcp add bank -- node /abs/path/mcp.js`:
-```json
-{ "mcpServers": { "bank": { "command": "node", "args": ["/abs/path/banking-dashboard/mcp.js"], "env": { "DATA_DIR": "/abs/path/banking-dashboard/data" } } } }
-```
+The installed app is its own MCP server: run `Pennystead --mcp` (add `--write` to allow recording valuations, `--data-dir <dir>` for a custom data folder). The easiest route is Settings â†’ **Chat with AI**, which shows the exact config for your install to paste into Claude Desktop, or a one-line command for Claude Code. From source: `node mcp.js` (Node 20+); it reads the same data folder as the app.
 Read-only tools: `net_worth`, `net_worth_history`, `overview`, `manual_assets`, `monthly_summary`, `spending_by_category`,
 `budget_status`, `search_transactions`, `subscriptions`, `anomalies`, `hledger_query`.
 Set `MCP_WRITE=1` to also expose `record_valuation` ("my car is worth 15,500 now"), which only writes `manual-assets.json`.

@@ -4,10 +4,18 @@ const args = process.argv.slice(2);
 const flag = (n) => args.includes(n);
 const opt = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
 
+// MCP mode: speak the protocol on stdin/stdout for Claude Desktop / Claude Code. Nothing else may print to stdout.
+if (flag('--mcp')) {
+  if (opt('--data-dir')) process.env.PENNYSTEAD_DATA = opt('--data-dir');
+  if (flag('--write')) process.env.MCP_WRITE = '1';
+  require('./mcp');
+} else {
+
 if (flag('--help') || flag('-h')) {
   console.log(`Pennystead: your private finance dashboard
 
 Usage: pennystead [options]
+  --mcp             Run as an MCP server on stdin/stdout (chat with your data from Claude). Add --write to allow recording valuations.
   --port <n>        Port to listen on (default 3456)
   --data-dir <dir>  Where your data is stored
   --no-browser      Do not open the browser on start
@@ -51,3 +59,4 @@ function openBrowser(url) {
     process.exit(1);
   }
 })();
+}

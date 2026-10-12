@@ -177,3 +177,12 @@ test('restore-upload refuses tampered, encrypted-without-passphrase and non-back
   assert.equal((await bad(zlib.gzipSync(JSON.stringify({ app: 'pennystead', v: 1, files: { '../../evil': Buffer.from('x').toString('base64') } })))).status, 400);
   assert.equal((await bad(zlib.gzipSync(JSON.stringify({ app: 'pennystead', v: 1, files: { 'secrets.json': Buffer.from('{}').toString('base64') } })))).status, 400);
 });
+
+test('Chat with AI: the config shown to the user points at this app and is valid JSON', async () => {
+  const r = await raw(port, { url: '/api/mcp-config' }); assert.equal(r.status, 200);
+  const c = JSON.parse(r.body);
+  const entry = JSON.parse(c.desktop).mcpServers.pennystead;
+  assert.equal(entry.command, process.execPath); assert.ok(entry.args.some((a) => a.endsWith('mcp.js')), 'from source it runs mcp.js');
+  assert.match(c.claudeCode, /^claude mcp add pennystead -- /);
+  assert.ok(!/key|secret|password/i.test(r.body.replace(/pennystead-test-[^"\\]*/g, '')), 'no credentials in the config');
+});

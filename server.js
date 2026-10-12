@@ -125,6 +125,15 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
         if (!PACKAGED && process.env.PENNYSTEAD_ALLOW_QUIT !== '1') throw HttpError(403, 'Quit is only available in the installed app.');
         json(res, 200, { ok: true }); setTimeout(() => process.exit(0), 200); return;
       }
+      if (P === '/api/mcp-config') {
+        const { PACKAGED, DATA_DIR } = require('./lib/config'); const custom = !!(process.env.PENNYSTEAD_DATA || process.env.DATA_DIR);
+        const command = process.execPath, args = PACKAGED ? ['--mcp'] : [path.join(__dirname, 'mcp.js')];
+        if (custom && PACKAGED) args.push('--data-dir', DATA_DIR);
+        const env = !PACKAGED && custom ? { PENNYSTEAD_DATA: DATA_DIR } : undefined;
+        const entry = { command, args, ...(env ? { env } : {}) };
+        const q = (x) => (/[\s"]/.test(x) ? `"${x.replace(/"/g, '\\"')}"` : x);
+        return json(res, 200, { command, args, desktop: JSON.stringify({ mcpServers: { pennystead: entry } }, null, 2), claudeCode: `claude mcp add pennystead -- ${[command, ...args].map(q).join(' ')}`, dataDir: DATA_DIR });
+      }
       if (P === '/api/autostart') { if (METHOD === 'POST') return json(res, 200, autostart.set((await readBody(req)).enabled)); return json(res, 200, autostart.status()); }
 
       // ----- bank connection -----

@@ -589,6 +589,19 @@ function impDone(el) {
 }
 
 // ---------- Connections (credentials) ----------
+pages.chat = {
+  title: 'Chat with AI',
+  async render(el) {
+    const c = await api('/api/mcp-config');
+    el.innerHTML = `
+      <p class="muted" style="margin:0 0 16px">Pennystead can answer questions about your money through Claude, using your own Claude Desktop or Claude Code. Claude runs a small Pennystead helper on this computer; nothing is sent anywhere until you ask Claude something, and then only the answers it needs go to Claude. Names, IBANs and long numbers are masked by default.</p>
+      ${card('Claude Desktop', 'Open Claude Desktop → Settings → Developer → Edit Config, add this, save, and restart Claude Desktop. If the file already has "mcpServers", add just the "pennystead" entry inside it.', `<pre style="margin:0 0 10px;padding:12px;background:var(--card2);border-radius:8px;overflow:auto;font-size:12px">${esc(c.desktop)}</pre><button type="button" class="btn sm" data-copy="${esc(c.desktop)}">Copy</button>`)}
+      ${card('Claude Code', 'Run this once in a terminal.', `<pre style="margin:0 0 10px;padding:12px;background:var(--card2);border-radius:8px;overflow:auto;font-size:12px">${esc(c.claudeCode)}</pre><button type="button" class="btn sm" data-copy="${esc(c.claudeCode)}">Copy</button>`)}
+      ${card('Try asking', '', '<ul class="muted" style="margin:0;padding-left:18px;line-height:1.8"><li>What is my net worth, and how has it changed this year?</li><li>Which subscriptions have gone up in price?</li><li>Did anything unusual happen in my spending last month?</li><li>Am I on track with my budgets?</li></ul>')}
+      <p class="muted" style="font-size:12px">Read-only by default. Add <code>--write</code> to the arguments to also let Claude record a new value for a manual asset (for example "my car is worth 15,500 now").</p>`;
+  },
+};
+
 pages.connections = {
   title: 'Connections',
   async render(el) {

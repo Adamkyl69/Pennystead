@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // MCP server (stdio, JSON-RPC) so an AI client can chat with your finances.
-// Claude Desktop config:  { "mcpServers": { "bank": { "command": "node", "args": ["/abs/path/mcp.js"], "env": { "DATA_DIR": "/abs/path/data" } } } }
+// Packaged app:  Pennystead --mcp [--write] [--data-dir <dir>]   From source:  node mcp.js   (Settings → Chat shows the exact config for your install)
 const hl = require('./lib/hl');
 const core = require('./lib/core');
 const A = require('./lib/analysis');
@@ -64,7 +64,7 @@ async function handle(msg) {
   const { id, method, params } = msg;
   if (id === undefined) return; // notification
   try {
-    if (method === 'initialize') return send({ jsonrpc: '2.0', id, result: { protocolVersion: params?.protocolVersion || '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'pennystead', version: '0.1.0' }, instructions: 'Personal finance data from an hledger journal. Amounts: negative = money out. Base currency is in net_worth/overview.' } });
+    if (method === 'initialize') return send({ jsonrpc: '2.0', id, result: { protocolVersion: params?.protocolVersion || '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'pennystead', version: require('./lib/version') }, instructions: 'Private personal finance data from Pennystead. Amounts: negative = money out. Base currency is in net_worth/overview.' } });
     if (method === 'ping') return send({ jsonrpc: '2.0', id, result: {} });
     if (method === 'tools/list') return send({ jsonrpc: '2.0', id, result: { tools: Object.entries(tools).map(([name, t]) => ({ name, description: t.d, inputSchema: { type: 'object', properties: t.s }, annotations: { readOnlyHint: !t.write } })) } });
     if (method === 'tools/call') {
