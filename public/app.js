@@ -24,7 +24,7 @@ function money(n, cur = BASE, o = {}) {
   catch { return `${(+n).toLocaleString(undefined, { maximumFractionDigits: Math.max(d, 2) })} ${cur}`; }
 }
 const money2 = (n, c) => money(n, c, { d: 2 });
-const compact = (n) => new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(n);
+const compact = (n) => new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: Math.abs(n) < 10 && n % 1 ? 2 : 1 }).format(n);
 const pct = (p) => (p == null ? '—' : `${p > 0 ? '+' : ''}${p}%`);
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 function keyLabel(k, period = 'month') {
@@ -108,7 +108,7 @@ function stackedBars(el, { buckets, groups, selected, onSelect, labelOf, height 
   const draw = () => {
     const W = el.clientWidth || 700, H = height, L = 52, R = 8, T = 8, B = 26, n = buckets.length;
     const { ticks, min, max } = niceTicks(0, Math.max(1, ...buckets.map((b) => b.total)));
-    const slot = (W - L - R) / n, bw = Math.min(64, slot * 0.62), y = (v) => T + (H - T - B) * (1 - (v - min) / (max - min || 1));
+    const slot = (W - L - R) / n, every = Math.ceil(44 / slot), bw = Math.min(64, slot * 0.62), y = (v) => T + (H - T - B) * (1 - (v - min) / (max - min || 1));
     let bars = '';
     buckets.forEach((b, i) => {
       const cx = L + slot * i + slot / 2, x0 = cx - bw / 2, on = !selected || selected === b.key;
@@ -118,7 +118,8 @@ function stackedBars(el, { buckets, groups, selected, onSelect, labelOf, height 
         const y1 = y(acc + s.v), h = y(acc) - y1; acc += s.v;
         bars += `<path d="${roundTop(x0, y1, bw, Math.max(h, 0.5), j === segs.length - 1 ? 4 : 0)}" fill="${s.g.color}" stroke="var(--surface)" stroke-width="2" opacity="${on ? 1 : 0.5}"/>`;
       });
-      bars += `<text x="${cx}" y="${H - 6}" text-anchor="middle" ${selected === b.key ? 'style="fill:var(--text)"' : ''}>${esc(labelOf(b.key))}</text><rect data-i="${i}" x="${L + slot * i}" y="0" width="${slot}" height="${H - B}" fill="transparent" style="cursor:pointer"/>`;
+      if (i % every === 0 || selected === b.key) bars += `<text x="${cx}" y="${H - 6}" text-anchor="middle" ${selected === b.key ? 'style="fill:var(--text)"' : ''}>${esc(labelOf(b.key))}</text>`;
+      bars += `<rect data-i="${i}" x="${L + slot * i}" y="0" width="${slot}" height="${H - B}" fill="transparent" style="cursor:pointer"/>`;
     });
     el.innerHTML = `<svg width="${W}" height="${H}">${gridY(ticks, y, L, W, R)}${bars}</svg>`;
     $$('rect[data-i]', el).forEach((r) => {
@@ -138,14 +139,15 @@ function flowChart(el, { months, height = 250 }) {
     if (!n) { el.innerHTML = '<p class="empty">No data yet.</p>'; return; }
     const all = months.flatMap((m) => [m.income, m.spend, m.saved]);
     const { ticks, min, max } = niceTicks(Math.min(0, ...all), Math.max(0, ...all));
-    const slot = (W - L - R) / n, bw = Math.min(26, slot * 0.3), y = (v) => T + (H - T - B) * (1 - (v - min) / (max - min || 1)), z = y(0);
+    const slot = (W - L - R) / n, every = Math.ceil(44 / slot), bw = Math.min(26, slot * 0.3), y = (v) => T + (H - T - B) * (1 - (v - min) / (max - min || 1)), z = y(0);
     let s = gridY(ticks, y, L, W, R), line = '', dots = '';
     months.forEach((m, i) => {
       const cx = L + slot * i + slot / 2, bar = (v, x, c) => { const y1 = y(Math.max(v, 0)), h = Math.abs(y(v) - z); return `<path d="${v >= 0 ? roundTop(x, y1, bw, Math.max(h, 0.5), 4) : `M${x} ${z}h${bw}v${h - 4}q0 4 -4 4h${-bw + 8}q-4 0 -4 -4z`}" fill="${c}"/>`; };
       s += bar(m.income, cx - bw - 1, 'var(--s1)') + bar(m.spend, cx + 1, 'var(--s2)');
       line += `${i ? 'L' : 'M'}${cx.toFixed(1)} ${y(m.saved).toFixed(1)}`;
       dots += `<circle cx="${cx}" cy="${y(m.saved)}" r="3.5" fill="var(--text)" stroke="var(--surface)" stroke-width="2"/>`;
-      s += `<text x="${cx}" y="${H - 6}" text-anchor="middle">${esc(keyLabel(m.month))}</text><rect data-i="${i}" x="${L + slot * i}" y="0" width="${slot}" height="${H - B}" fill="transparent"/>`;
+      if (i % every === 0) s += `<text x="${cx}" y="${H - 6}" text-anchor="middle">${esc(keyLabel(m.month))}</text>`;
+      s += `<rect data-i="${i}" x="${L + slot * i}" y="0" width="${slot}" height="${H - B}" fill="transparent"/>`;
     });
     el.innerHTML = `<svg width="${W}" height="${H}">${s}<path d="${line}" fill="none" stroke="var(--text)" stroke-width="1.5"/>${dots}</svg>`;
     $$('rect[data-i]', el).forEach((r) => {
@@ -205,25 +207,53 @@ function renderSide(route) {
     go();
   };
 }
-$('#burger').onclick = () => $('#side').classList.toggle('open');
+const setMenu = (open) => { $('#side').classList.toggle('open', open); $('#burger').setAttribute('aria-expanded', String(open)); };
+$('#burger').onclick = (e) => { e.stopPropagation(); setMenu(!$('#side').classList.contains('open')); };
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setMenu(false); });
+document.addEventListener('click', (e) => { if ($('#side').classList.contains('open') && !e.target.closest('#side')) setMenu(false); });
 
 // ---------- router ----------
 const pages = {};
-let lastRoute = null;
+let lastRoute = null, navSeq = 0;
 async function loadState() { ST = await api('/api/state'); BASE = ST.base; }
 async function go() {
   redraws = []; hideTip();
   const route = (location.hash.replace(/^#\//, '') || 'overview').split('?')[0];
   const page = pages[route] || pages.overview;
-  $('#side').classList.remove('open');
-  try { await loadState(); } catch (e) { $('#page').innerHTML = `<div class="card bad">${esc(e.message)}</div>`; return; }
+  setMenu(false);
+  const seq = ++navSeq;
+  try { await loadState(); } catch (e) { if (seq === navSeq) $('#page').innerHTML = `<div class="card bad">${esc(e.message)}</div>`; return; }
+  if (seq !== navSeq) return; // the user has already moved on to another page
   renderSide(route in pages ? route : 'overview');
   $('#title').textContent = page.title;
   $('#topActions').innerHTML = ST.demo ? '<span class="pill warn">Sample data</span><button class="btn sm" id="clearDemo">Clear sample data</button>' : '';
   if ($('#clearDemo')) $('#clearDemo').onclick = async () => { if (!confirm('Remove the sample data and start with an empty Pennystead?')) return; await api('/api/demo/clear', 'POST'); location.hash = '#/overview'; go(); };
   const from = lastRoute; lastRoute = route;
-  try { await page.render($('#page'), { from }); } catch (e) { console.error(e); $('#page').innerHTML = `<div class="card bad">${esc(e.message)}</div>`; }
+  // Each navigation renders into its own container: if an older page finishes loading late, it writes into a detached one.
+  const host = document.createElement('div');
+  $('#page').replaceChildren(host);
+  try { await page.render(host, { from }); } catch (e) { console.error(e); host.innerHTML = `<div class="card bad">${esc(e.message)}</div>`; }
 }
 // Rows that navigate use data-goto (inline event handlers are blocked by the Content-Security-Policy).
 document.addEventListener('click', (e) => { const r = e.target.closest('[data-goto]'); if (r) location.hash = r.dataset.goto; });
+// Every Copy button, on any page.
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-copy]');
+  if (!b) return;
+  try { await navigator.clipboard.writeText(b.dataset.copy); toast('Copied'); } catch { toast('Select the text and copy it manually'); }
+});
+// A double-click on a submit button must not send the form twice (two "Add" clicks would create two assets).
+document.addEventListener('submit', (e) => {
+  const f = e.target;
+  if (f._busy) { e.preventDefault(); e.stopImmediatePropagation(); return; }
+  f._busy = true; setTimeout(() => { f._busy = false; }, 1500);
+}, true);
+// Clickable rows and links without href work from the keyboard too (Enter or Space).
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const t = e.target;
+  if (t.matches('[data-goto],[data-drill],[data-crumb],[data-budget],[data-setbudget],[data-toggle],a[role=button]')) { e.preventDefault(); t.click(); }
+});
+// Make those elements focusable whenever a page renders them.
+new MutationObserver(() => { for (const n of document.querySelectorAll('[data-goto],[data-drill],[data-crumb],[data-budget],[data-setbudget],[data-toggle],a:not([href])')) if (!n.hasAttribute('tabindex') || n.tabIndex < 0) { n.tabIndex = 0; if (n.tagName === 'A') n.setAttribute('role', 'button'); } }).observe(document.body, { childList: true, subtree: true });
 addEventListener('hashchange', go);

@@ -3,7 +3,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { paths, DATA_DIR, PACKAGED, loadConfig } = require('./lib/config');
+const { paths, DATA_DIR, PACKAGED, loadConfig, writeAtomic } = require('./lib/config');
 const { eb, configured } = require('./lib/eb');
 const { sync } = require('./lib/sync');
 const { updatePrices } = require('./lib/prices');
@@ -65,6 +65,9 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
         const wait = auth.locked(ip);
         if (wait) return json(res, 429, { error: `Too many attempts. Try again in ${Math.ceil(wait / 60)} minutes.` }, { 'Retry-After': String(wait) });
         const { password } = await readBody(req);
+        // Checked again after the body arrives: requests sent in parallel would otherwise all pass the first check.
+        const again = auth.locked(ip);
+        if (again) return json(res, 429, { error: `Too many attempts. Try again in ${Math.ceil(again / 60)} minutes.` }, { 'Retry-After': String(again) });
         if (!auth.verify(password)) { auth.failed(ip); return json(res, 401, { error: 'Wrong password.' }); }
         auth.succeeded(ip);
         return json(res, 200, { ok: true }, { 'Set-Cookie': auth.setCookie(auth.newSession()) });
@@ -86,8 +89,10 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
         const b = await readBody(req);
         if (process.env.PENNYSTEAD_PASSWORD) throw HttpError(400, 'The password is set by the PENNYSTEAD_PASSWORD environment variable.');
         if (auth.required() && !auth.verify(b.current)) throw HttpError(403, 'Current password is wrong.');
+        // Only a string sets a password and only an explicit null removes it: a missing field must not switch login off.
+        if (b.password !== null && typeof b.password !== 'string') throw HttpError(400, 'Send the new password, or null to remove it.');
         if (b.password === null && exposed) throw HttpError(400, 'A password is required while Pennystead listens on the network.');
-        auth.setPassword(b.password ?? null);
+        auth.setPassword(b.password);
         return json(res, 200, { required: auth.required() }, b.password ? { 'Set-Cookie': auth.setCookie(auth.newSession()) } : { 'Set-Cookie': auth.clearCookie() });
       }
 
@@ -126,7 +131,7 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
         json(res, 200, { ok: true }); setTimeout(() => process.exit(0), 200); return;
       }
       if (P === '/api/mcp-config') {
-        const { PACKAGED, DATA_DIR } = require('./lib/config'); const custom = !!(process.env.PENNYSTEAD_DATA || process.env.DATA_DIR);
+        const custom = !!(process.env.PENNYSTEAD_DATA || process.env.DATA_DIR);
         const command = process.execPath, args = PACKAGED ? ['--mcp'] : [path.join(__dirname, 'mcp.js')];
         if (custom && PACKAGED) args.push('--data-dir', DATA_DIR);
         const env = !PACKAGED && custom ? { PENNYSTEAD_DATA: DATA_DIR } : undefined;
@@ -153,7 +158,7 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
         const code = q.code;
         if (!code || q.state !== pendingState) return send(res, 400, 'Bad or missing code/state. Start again from the dashboard.', 'text/plain');
         pendingState = null;
-        fs.writeFileSync(paths.session, JSON.stringify(await eb('POST', '/sessions', { code }), null, 2), { mode: 0o600 });
+        writeAtomic(paths.session, JSON.stringify(await eb('POST', '/sessions', { code }), null, 2), { mode: 0o600 });
         await runSync().catch((e) => console.error('initial sync failed:', e.message));
         res.writeHead(302, security.headers({ Location: '/' })); return res.end();
       }

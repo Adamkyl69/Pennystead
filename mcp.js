@@ -61,6 +61,7 @@ if (WRITE) tools.record_valuation = {
 
 const send = (m) => process.stdout.write(JSON.stringify(m) + '\n');
 async function handle(msg) {
+  if (!msg || typeof msg !== 'object') return; // not a JSON-RPC message
   const { id, method, params } = msg;
   if (id === undefined) return; // notification
   try {
@@ -82,4 +83,4 @@ async function handle(msg) {
 }
 
 let buf = '';
-process.stdin.on('data', (c) => { buf += c; let i; while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (line) { try { handle(JSON.parse(line)); } catch { /* ignore garbage */ } } } });
+process.stdin.on('data', (c) => { buf += c; let i; while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (line) { try { handle(JSON.parse(line)).catch(() => {}); } catch { /* ignore garbage */ } } } });

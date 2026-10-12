@@ -52,7 +52,7 @@ function openBrowser(url) {
   } catch (e) {
     if (e.code === 'EADDRINUSE') {
       // Is it Pennystead itself? Then just bring it up instead of failing.
-      const r = await fetch(`http://127.0.0.1:${port}/api/ping`).then((x) => x.json()).catch(() => null);
+      const r = await fetch(`http://127.0.0.1:${port}/api/ping`, { signal: AbortSignal.timeout(2000) }).then((x) => x.json()).catch(() => null);
       if (r?.app === 'pennystead') { console.log(`Pennystead is already running at http://localhost:${port}. Opening it.`); openBrowser(`http://localhost:${port}`); process.exit(0); }
       console.error(`Port ${port} is used by another program. Close it, or start Pennystead with --port <another number>.`);
     } else console.error(`Pennystead could not start: ${e.message}`);

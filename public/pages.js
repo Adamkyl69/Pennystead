@@ -96,7 +96,7 @@ pages.spending = {
       <h3 style="font-size:14px;margin:0 0 8px">${esc(pl(sel))} by ${sp.group}</h3>
       <div class="tbl"><table><thead><tr><th>Name</th><th class="n">Amount</th><th class="n">3-period avg</th><th style="width:22%">Budget</th><th class="n">vs prev</th><th class="n">vs avg</th><th class="n">Count</th></tr></thead><tbody>
       ${T.rows.map((x) => `<tr class="${x.drill ? 'click' : ''}" ${x.drill ? `data-drill="${esc(x.key)}"` : ''}><td><span class="sw" style="background:${color[x.key] || 'var(--other)'}"></span>${esc(nameOf(x, r))}${x.drill ? ' <span class="muted">›</span>' : ''}</td><td class="n">${money(x.amount)}</td><td class="n muted">${money(x.avg)}</td>
-        <td>${sp.group === 'category' ? (x.budget ? `<div data-budget="${esc(x.key)}" style="cursor:pointer" title="Click to change">${budgetBar(x.budget)}</div>` : `<a class="muted" style="cursor:pointer" data-setbudget="${esc(x.key)}">+ Set budget</a>`) : ''}</td>
+        <td>${sp.group === 'category' ? (x.budget ? `<div data-budget="${esc(x.key)}" data-amt="${x.budget.amount}" data-kind="${x.budget.kind}" style="cursor:pointer" title="Click to change">${budgetBar(x.budget)}</div>` : `<a class="muted" style="cursor:pointer" data-setbudget="${esc(x.key)}">+ Set budget</a>`) : ''}</td>
         <td class="n">${delta(x.vsPrev)}</td><td class="n">${delta(x.vsAvg)}</td><td class="n muted">${x.count}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">No spending in this period.</td></tr>'}</tbody></table></div>
       ${yearlyCard(r.yearly)}
       ${card('Top vendors', `Last ${r.keys.length} ${sp.period}s`, `<table><tbody>${r.vendors.map((v) => `<tr><td>${esc(v.name)}<div class="muted" style="font-size:11px">${v.count} × avg ${money(v.avg)}</div></td><td>${sparkline(v.series)}</td><td class="n">${money(v.total)}</td></tr>`).join('') || '<tr><td class="empty">No vendors.</td></tr>'}</tbody></table>`)}`}`;
@@ -255,8 +255,10 @@ pages.transactions = {
       <input type="date" id="from" value="${tx.from}" title="From"><input type="date" id="to" value="${tx.to}" title="To"><a class="btn right" href="#/import">Import…</a></div>
       <div class="tbl" id="txBody"></div><div id="more" style="text-align:center;margin-bottom:24px"></div>`;
     const cats = first.categories;
+    let seq = 0;
     const load = async () => {
-      const r = await api('/api/transactions?' + new URLSearchParams(tx));
+      const mine = ++seq, r = await api('/api/transactions?' + new URLSearchParams(tx));
+      if (mine !== seq) return; // a newer search was typed while this one loaded
       $('#txBody', el).innerHTML = txTable(r.rows, true, cats);
       $('#more', el).innerHTML = r.total > r.rows.length ? `<button class="btn" id="moreBtn">Show more (${r.total - r.rows.length} left)</button>` : `<span class="muted">${r.total} transactions</span>`;
       if ($('#moreBtn', el)) $('#moreBtn', el).onclick = () => { tx.limit += 100; load(); };
@@ -460,9 +462,9 @@ async function impUpload(el) {
   const hist = await api('/api/import/history');
   el.innerHTML = `
     ${card('Import transactions', 'Load historical data from a CSV or Excel (.xlsx) export of your bank. You will map the columns, check a preview, and nothing is saved until you confirm. Every import can be undone.',
-      `<label id="drop" style="display:block;border:1.5px dashed var(--line);border-radius:10px;padding:34px 16px;text-align:center;cursor:pointer;color:var(--text2)">
+      `<label id="drop" tabindex="0" role="button" style="display:block;border:1.5px dashed var(--line);border-radius:10px;padding:34px 16px;text-align:center;cursor:pointer;color:var(--text2)">
         <div style="font-size:15px;color:var(--text)">Drop a file here or click to choose</div><div class="muted" style="margin-top:6px;font-size:12px">.csv, .tsv, .txt, .xlsx · up to 30 MB · comma, semicolon or tab separated · UTF-8 or Windows-1252</div>
-        <input type="file" id="file" accept=".csv,.tsv,.txt,.xlsx,.xlsm,text/csv" hidden></label>
+        <input type="file" id="file" accept=".csv,.tsv,.txt,.xlsx,.xlsm,text/csv" class="sr-only"></label>
       <p class="muted" style="margin:10px 0 0;font-size:12px">Tip: if your bank offers several formats, pick CSV. Old <code>.xls</code> files: open in Excel and Save As .xlsx or CSV. Importing the same file twice is safe: duplicates are detected.</p>`)}
     ${card('Past imports', 'Undo removes exactly the transactions an import added and restores the account balance.', hist.length ? `<div class="tbl" style="margin:0"><table><thead><tr><th>File</th><th>Account</th><th class="n">Added</th><th>Period</th><th>Imported</th><th></th></tr></thead><tbody>${hist.map((h) => `<tr><td>${esc(h.file)}</td><td>${esc(h.account)}</td><td class="n">${h.added}</td><td class="muted">${esc(h.from || '')} → ${esc(h.to || '')}</td><td class="muted">${esc(new Date(h.at).toLocaleString())}</td><td class="n">${h.undoneAt ? '<span class="muted">undone</span>' : `<button class="btn sm danger" data-undo="${esc(h.id)}">Undo</button>`}</td></tr>`).join('')}</tbody></table></div>` : '<p class="empty">No imports yet.</p>')}`;
   const send = async (file) => {
@@ -479,6 +481,7 @@ async function impUpload(el) {
   };
   const drop = $('#drop', el);
   $('#file', el).onchange = (e) => send(e.target.files[0]);
+  drop.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('#file', el).click(); } };
   ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.style.borderColor = 'var(--accent)'; }));
   ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.style.borderColor = 'var(--line)'; }));
   drop.addEventListener('drop', (e) => send(e.dataTransfer.files[0]));
@@ -495,7 +498,7 @@ function impMap(el) {
     ${card(esc(d.filename), `${d.kind === 'xlsx' ? 'Excel workbook' : `CSV · ${esc(d.encoding)} · delimiter “${d.delimiter === '\t' ? 'tab' : esc(d.delimiter)}”`} · ${d.rowCount} data rows${d.fromProfile ? ' · <span class="good">using the mapping you saved for this layout</span>' : ''}`, `
       <div class="row" style="margin-bottom:12px">
         ${d.sheets ? `<label class="muted">Sheet</label><select id="sheet">${d.sheets.map((n, i) => `<option value="${i}" ${i === d.sheet ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>` : `<label class="muted">Delimiter</label><select id="delim">${[[',', 'comma ,'], [';', 'semicolon ;'], ['\t', 'tab'], ['|', 'pipe |']].map(([v, l]) => `<option value="${v}" ${d.delimiter === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`}
-        <label class="muted" style="margin-left:10px">Header is on row</label><input type="number" id="hrow" min="1" value="${d.headerRow}" style="width:70px"><span class="muted" style="font-size:12px">(rows above it, such as account info, are ignored)</span></div>
+        <label class="muted" style="margin-left:10px">Header is on row</label><input type="number" id="hrow" min="0" value="${d.headerRow}" style="width:70px"><span class="muted" style="font-size:12px">(rows above it, such as account info, are ignored; 0 = the file has no header row)</span></div>
       <div class="tbl" style="margin:0"><table><thead><tr>${d.headers.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${d.sample.map((r) => `<tr>${r.map((c) => `<td class="muted" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`)}
     <form id="mapForm">
     ${card('Where should these go?', 'Pick the account the transactions belong to.', `<div class="form">
@@ -569,7 +572,7 @@ function impPreview(el) {
     ${card('Preview', `First ${p.sample.length} rows. Categories come from your rules and can be changed afterwards.`, `<div class="tbl" style="margin:0"><table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Status</th><th class="n">Amount</th></tr></thead><tbody>${p.sample.map((r) => `<tr style="${r.include ? '' : 'opacity:.5'}"><td class="muted" style="white-space:nowrap">${esc(r.date)}</td><td>${esc(r.desc)}</td><td class="muted">${esc(catLabel(r.category))}</td><td><span class="pill ${IMP_STATUS[r.status][1]}">${IMP_STATUS[r.status][0]}</span></td><td class="n ${r.amount < 0 ? '' : 'good'}">${money2(r.amount, cur)}</td></tr>`).join('')}</tbody></table></div>`)}
     ${p.errors.length ? card(`Rows with problems (${c.errors})`, 'These rows are skipped. Fix the mapping above or correct the file if they should be included.', `<div class="tbl" style="margin:0"><table><tbody>${p.errors.map((e) => `<tr><td class="muted" style="width:70px">row ${e.line}</td><td class="bad" style="width:36%">${esc(e.error)}</td><td class="muted">${esc(e.values)}</td></tr>`).join('')}</tbody></table></div>`) : ''}
     <div class="row" style="margin-bottom:24px"><button class="btn primary" id="commit" ${c.toImport ? '' : 'disabled'}>Import ${c.toImport} transaction${c.toImport === 1 ? '' : 's'}</button><button class="btn" id="back2">Back</button></div>`;
-  $('#back', el).onclick = $('#back2', el).onclick = () => { imp.step = 'map'; go(); };
+  $('#back', el).onclick = $('#back2', el).onclick = () => { imp.d.mapping = { ...imp.mapping }; imp.step = 'map'; go(); };
   $('#restart', el).onclick = () => { Object.assign(imp, { step: 'upload', d: null, pv: null }); go(); };
   if ($('#oPoss', el)) $('#oPoss', el).onchange = (e) => { imp.opts.includePossible = e.target.checked; impRunPreview(); };
   if ($('#oOver', el)) $('#oOver', el).onchange = (e) => { imp.opts.includeOverlap = e.target.checked; impRunPreview(); };
@@ -607,7 +610,7 @@ pages.connections = {
   async render(el) {
     const c = await api('/api/settings');
     const status = (x) => (x.configured ? `<span class="good">Configured</span>${x.source === 'environment' ? ' <span class="muted">(from an environment variable)</span>' : ''}` : '<span class="muted">Not set up</span>');
-    const copy = (id, v) => `<div class="row"><code id="${id}" style="padding:4px 8px;background:var(--card2);border-radius:6px">${esc(v)}</code><button type="button" class="btn sm" data-copy="${esc(v)}">Copy</button></div>`;
+    const copy = (id, v) => `<div class="row"><code id="${id}" style="padding:4px 8px;background:var(--card2);border-radius:6px;word-break:break-all">${esc(v)}</code><button type="button" class="btn sm" data-copy="${esc(v)}">Copy</button></div>`;
     el.innerHTML = `
       <p class="muted" style="margin:0 0 16px">These credentials are stored only on this computer, are never included in backups, and are never shown again after saving.</p>
       ${card('Bank sync · Enable Banking', status(c.enablebanking) + (c.enablebanking.appId ? ` · Application ID <code>${esc(c.enablebanking.appId)}</code>` : ''), `
@@ -624,7 +627,6 @@ pages.connections = {
       ${card('Google Drive backups', status(c.google) + (c.google.clientId ? ` · <code>${esc(c.google.clientId.slice(0, 18))}…</code>` : ''), `<p class="muted" style="margin:0 0 10px;font-size:13px">Optional. Create an OAuth client of type <b>Desktop app</b> in Google Cloud (steps are on the <a href="#/backups">Backups</a> page) and use this redirect URI if asked:</p>${copy('gu', c.googleRedirectUrl)}
         <form id="gForm" class="form" style="margin-top:10px"><label>Client ID<input type="text" name="clientId" value="${esc(c.google.clientId || '')}" required autocomplete="off"></label><label>Client secret<input type="password" name="clientSecret" required autocomplete="off"></label>
           <div class="row"><button class="btn primary">${c.google.configured ? 'Replace' : 'Save'}</button>${c.google.configured && c.google.source !== 'environment' ? '<button type="button" class="btn danger" id="gClear">Remove</button>' : ''}</div></form>`)}`;
-    $$('[data-copy]', el).forEach((b) => (b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast('Copied'); } catch { toast('Select the text and copy it manually'); } }));
     const save = (url, body, msg) => run(() => api(url, 'PUT', body), msg).then(() => ST && go());
     $('#ebForm', el).onsubmit = async (e) => {
       e.preventDefault(); const f = e.target, file = f.key.files[0];
