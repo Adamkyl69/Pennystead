@@ -1,0 +1,77 @@
+# Builds the downloadable app for Windows, macOS (Apple Silicon + Intel) and Linux, smoke-tests each one on its own OS,
+# and publishes them to a GitHub Release when you push a version tag:  git tag v1.0.0 && git push --tags
+name: Release
+on:
+  push: { tags: ['v*'] }
+  workflow_dispatch: {}
+permissions: { contents: write }
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04, name: linux-x64 }
+          - { os: windows-latest, name: windows-x64 }
+          - { os: macos-14, name: macos-arm64 }
+          - { os: macos-13, name: macos-x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0   # an official nodejs.org build: required for single-executable support
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Build the single-file executable
+        run: node scripts/build.js
+      - name: Smoke test the executable (starts it, drives it over HTTP, quits it)
+        run: node scripts/smoke.js dist/${{ runner.os == 'Windows' && 'pennystead.exe' || 'pennystead' }}
+      - name: Package
+        run: node scripts/package.js
+
+      # ----- Windows installer -----
+      - name: Build the Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $v = node -p "require('./package.json').version"
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Qp "/DAppVersion=$v" packaging\windows\pennystead.iss
+      - name: Silent-install the Windows installer and smoke test the installed app
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem release\*-setup.exe).FullName
+          Start-Process -FilePath $setup -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$PWD\installed" -Wait
+          node scripts/smoke.js "$PWD\installed\pennystead.exe"
+
+      # ----- macOS disk image -----
+      - name: Build the macOS disk image
+        if: runner.os == 'macOS'
+        run: |
+          mkdir dmgroot && ditto -x -k release/Pennystead-*-macos-*.zip dmgroot
+          hdiutil create -volname Pennystead -srcfolder dmgroot -ov -format UDZO "release/Pennystead-$(node -p "require('./package.json').version")-${{ matrix.name }}.dmg"
+
+      - name: Checksums
+        shell: bash
+        run: cd release && (sha256sum * 2>/dev/null || shasum -a 256 *) > SHA256SUMS-${{ matrix.name }}.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pennystead-${{ matrix.name }}
+          path: release/*
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true

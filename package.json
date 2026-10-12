@@ -1,0 +1,25 @@
+{
+  "name": "pennystead",
+  "private": true,
+  "description": "Personal finance dashboard on Enable Banking + hledger, with an MCP server",
+  "scripts": {
+    "start": "node main.js",
+    "demo": "node demo.js && DATA_DIR=data-demo node main.js",
+    "mcp": "node mcp.js",
+    "sync": "node cli.js sync",
+    "prices": "node cli.js prices",
+    "test": "node --test \"tests/**/*.test.js\"",
+    "build": "node scripts/build.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "version": "1.0.0",
+  "bin": {
+    "pennystead": "main.js"
+  },
+  "main": "main.js",
+  "devDependencies": {
+    "postject": "^1.0.0-alpha.6"
+  }
+}

@@ -1,0 +1,15 @@
+# docker compose up -d      (set PENNYSTEAD_PASSWORD first, e.g. in a .env file next to this one)
+services:
+  pennystead:
+    build: .
+    image: pennystead:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3456:3456"      # reachable from this machine only. To use it from other devices, put it behind a VPN (Tailscale/WireGuard)
+    environment:                   # and list the name you browse to in PENNYSTEAD_ALLOWED_HOSTS, e.g. mybox.tailnet.ts.net:3456
+      PENNYSTEAD_PASSWORD: ${PENNYSTEAD_PASSWORD:?Set PENNYSTEAD_PASSWORD to a password of 8 or more characters}
+      PENNYSTEAD_ALLOWED_HOSTS: ${PENNYSTEAD_ALLOWED_HOSTS:-}
+    volumes:
+      - pennystead-data:/data
+volumes:
+  pennystead-data:

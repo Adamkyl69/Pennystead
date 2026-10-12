@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Pennystead
+Comment=Your private finance dashboard
+Exec="__EXEC__"
+Icon=__ICON__
+Terminal=true
+Categories=Office;Finance;

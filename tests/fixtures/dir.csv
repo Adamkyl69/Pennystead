@@ -1,0 +1,5 @@
+Booking date,Counterparty,Amount,Debit/Credit,Currency,Reference
+2024-04-01,Netflix,12.99,DBIT,EUR,sub
+2024-04-02,ACME OY,3400.00,CRDT,EUR,salary
+2024-04-03,Wolt,22.50,DBIT,EUR,
+2024-04-04,Foreign Shop,10.00,DBIT,USD,wrong currency

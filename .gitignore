@@ -1,0 +1,9 @@
+.env
+*.pem
+data/
+data-demo/
+backups/
+node_modules/
+dist/
+*.blob
+release/

@@ -1,0 +1,5 @@
+Transaction Date,Post Date,Description,Category,Type,Amount,Memo
+01/15/2024,01/16/2024,"AMAZON.COM, INC.",Shopping,Sale,-59.99,
+01/16/2024,01/17/2024,PAYROLL ACME,Income,Payment,"3,400.00",Jan salary
+01/20/2024,01/21/2024,TRADER JOES,Groceries,Sale,-82.14,"weekly, big shop"
+02/13/2024,02/14/2024,SHELL OIL,Gas,Sale,-40.00,
