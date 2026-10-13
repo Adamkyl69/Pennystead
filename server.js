@@ -9,6 +9,7 @@ const { sync } = require('./lib/sync');
 const { updatePrices } = require('./lib/prices');
 const core = require('./lib/core');
 const goals = require('./lib/goals');
+const goalChecks = require('./lib/goalchecks');
 const manual = require('./lib/manual');
 const backup = require('./lib/backup');
 const gdrive = require('./lib/gdrive');
@@ -100,7 +101,7 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
       // ----- app state & data -----
       if (P === '/api/state') {
         const accounts = Object.values(store.accounts()).map((a) => ({ name: a.name, label: a.label, currency: a.currency, lastSync: a.lastSync || null, imported: !!a.imported, iban: a.iban ? a.iban.slice(-4) : null }));
-        return json(res, 200, { ...(await core.state()), version: VERSION, packaged: PACKAGED, dataDir: DATA_DIR, authRequired: auth.required(), hasData: !demo.isEmpty(), canConnect: configured(), canPrices: !!settings.alphaVantage(), demo: demo.isDemo(), accounts, redirectUrl: REDIRECT_URL, port });
+        return json(res, 200, { ...(await core.state()), goalCheck: goalChecks.unseen(), version: VERSION, packaged: PACKAGED, dataDir: DATA_DIR, authRequired: auth.required(), hasData: !demo.isEmpty(), canConnect: configured(), canPrices: !!settings.alphaVantage(), demo: demo.isDemo(), accounts, redirectUrl: REDIRECT_URL, port });
       }
       if (P === '/api/overview') return json(res, 200, await core.overview());
       if (P === '/api/history') return json(res, 200, await core.wealthHistory(q.range));
@@ -132,6 +133,14 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
         if (!PACKAGED && process.env.PENNYSTEAD_ALLOW_QUIT !== '1') throw HttpError(403, 'Quit is only available in the installed app.');
         json(res, 200, { ok: true }); setTimeout(() => process.exit(0), 200); return;
       }
+      if (P === '/api/goals/checks') {
+        if (METHOD === 'POST') return json(res, 200, goalChecks.run({ force: true }) || { none: true });
+        const c = loadConfig();
+        return json(res, 200, { checks: goalChecks.all(), unseen: goalChecks.unseen(), mode: c.goalChecks || 'monthly' });
+      }
+      if (P === '/api/goals/checks/mode' && METHOD === 'POST') { const { mode } = await readBody(req); if (!['monthly', 'off'].includes(mode)) throw HttpError(400, 'mode must be "monthly" or "off"'); const c = loadConfig(); c.goalChecks = mode; saveConfig(c); return json(res, 200, { mode }); }
+      const cs = P.match(/^\/api\/goals\/checks\/(\d{4}-\d{2})\/seen$/);
+      if (cs && METHOD === 'POST') { goalChecks.markSeen(cs[1]); return json(res, 200, {}); }
       if (P === '/api/goals') {
         if (METHOD === 'POST') return json(res, 200, goals.create(await readBody(req)));
         return json(res, 200, goals.list());
@@ -243,13 +252,15 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
   // Keep data fresh: sync on start and every 6 hours while connected; scheduled backups every 10 minutes.
   const timers = [];
   const tick = () => hasSession() && runSync().catch((e) => console.error('sync failed:', e.message));
+  // The monthly goal check: hourly is enough to catch the first run of a new month; it does nothing otherwise.
+  const gtick = () => { try { goalChecks.run(); } catch (e) { console.error('goal check failed:', e.message); } };
   const btick = () => backup.runBackup().then((r) => r.filter((x) => x.error).forEach((x) => console.error(`backup (${x.dest}) failed: ${x.error}`))).catch((e) => console.error('backup failed:', e.message));
 
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
       server.off('error', reject);
-      timers.push(setInterval(tick, 6 * 3600e3), setInterval(btick, 10 * 60e3), setTimeout(btick, 30e3), setTimeout(tick, 1000));
+      timers.push(setInterval(tick, 6 * 3600e3), setInterval(btick, 10 * 60e3), setTimeout(btick, 30e3), setTimeout(tick, 1000), setInterval(gtick, 3600e3), setTimeout(gtick, 60e3));
       timers.forEach((t) => t.unref());
       resolve({ server, port, host, url: `http://localhost:${port}`, stop: () => new Promise((r) => { timers.forEach(clearTimeout); server.close(() => r()); server.closeAllConnections?.(); }) });
     });

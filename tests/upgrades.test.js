@@ -91,3 +91,27 @@ test('goals: progress from the real balance, projection at your pace, status and
   assert.throws(() => G.update(g.id, { by: '2001-01-01' }), /future/); assert.throws(() => G.create({ name: 'x', target: -5 }), /above 0/); assert.throws(() => G.update(g.id, { source: 'nope' }), /Unknown balance/);
   G.remove(g.id); assert.ok(!G.list().goals.some((x) => x.id === g.id));
 });
+
+test('monthly goal check: once per month, records status and change since the last check, can be dismissed or turned off', () => {
+  const G = require('../lib/goals'), C = require('../lib/goalchecks');
+  store.saveTxs({}); store.saveAccounts({}); fs.rmSync(paths.goalChecks, { force: true });
+  saveConfig({ ...loadConfig(), goals: [], goalChecks: 'monthly' });
+  assert.equal(C.run(), null, 'no goals: nothing to check');
+  store.saveAccounts({ a: { name: 'pot', label: 'Pot', currency: 'EUR', imported: true, opening: { date: shiftDays(today(), -400), amount: 1000, cur: 'EUR' } } });
+  const g = G.create({ name: 'Pot', target: 5000, source: 'acct:assets:bank:pot' });
+  const first = C.run();
+  assert.equal(first.month, today().slice(0, 7)); assert.equal(first.goals[0].current, 1000); assert.equal(first.goals[0].change, null, 'nothing to compare with yet');
+  assert.equal(C.run(), null, 'already checked this month');
+  assert.equal(C.unseen().month, first.month);
+  // Pretend that check was last month, add savings, check again: the change and the earlier status are recorded.
+  const prevMonth = shiftDays(today().slice(0, 7) + '-01', -1).slice(0, 7);
+  fs.writeFileSync(paths.goalChecks, JSON.stringify([{ ...first, month: prevMonth, goals: [{ ...first.goals[0], status: 'behind' }] }]));
+  store.saveTxs({ x: { acct: 'assets:bank:pot', date: today(), amount: 600, cur: 'EUR', desc: 'SAVE', text: 'SAVE' } });
+  const second = C.run();
+  assert.equal(second.goals[0].change, 600); assert.equal(second.goals[0].statusBefore, 'behind');
+  assert.equal(C.history(g.id).length, 2);
+  C.markSeen(second.month); assert.equal(C.unseen(), null);
+  saveConfig({ ...loadConfig(), goalChecks: 'off' }); fs.rmSync(paths.goalChecks, { force: true });
+  assert.equal(C.run(), null, 'turned off'); assert.ok(C.run({ force: true }), '"Check now" still works');
+  G.remove(g.id);
+});
