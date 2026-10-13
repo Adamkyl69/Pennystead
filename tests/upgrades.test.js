@@ -115,3 +115,41 @@ test('monthly goal check: once per month, records status and change since the la
   assert.equal(C.run(), null, 'turned off'); assert.ok(C.run({ force: true }), '"Check now" still works');
   G.remove(g.id);
 });
+
+test('earmarking: percentages first, then fixed amounts in goal order, then what is left shared; never more than the balance', () => {
+  const { split } = require('../lib/goals');
+  const r = split(25000, [{ goal: 'e', share: 'amount', value: 10000 }, { goal: 'h', share: 'rest' }, { goal: 't', share: 'percent', value: 10 }]);
+  assert.deepEqual(Object.fromEntries(r.parts), { e: 10000, h: 12500, t: 2500 }); assert.equal(r.left, 0);
+  const short = split(6000, [{ goal: 'a', share: 'amount', value: 5000 }, { goal: 'b', share: 'amount', value: 5000 }]);
+  assert.deepEqual(Object.fromEntries(short.parts), { a: 5000, b: 1000 }, 'the earlier goal is filled first');
+  assert.deepEqual(Object.fromEntries(split(900, [{ goal: 'x', share: 'rest' }, { goal: 'y', share: 'rest' }]).parts), { x: 450, y: 450 });
+  assert.equal(split(1000, [{ goal: 'a', share: 'amount', value: 300 }]).left, 700, 'the rest stays unearmarked');
+});
+test('goals over shared and multiple accounts never count the same money twice; "only what I add" starts from zero', () => {
+  const G = require('../lib/goals');
+  store.saveTxs({}); require('../lib/demo').clear(); saveConfig({ ...loadConfig(), goals: [] });
+  const t = today();
+  store.saveAccounts({ s: { name: 'savings', label: 'Savings', currency: 'EUR', imported: true, opening: { date: shiftDays(t, -100), amount: 25000, cur: 'EUR' } }, i: { name: 'isa', label: 'ISA', currency: 'EUR', imported: true, opening: { date: shiftDays(t, -100), amount: 4000, cur: 'EUR' } } });
+  const em = G.create({ name: 'Emergency', target: 10000, source: 'accounts', accounts: [{ account: 'assets:bank:savings', share: 'amount', value: 10000 }] });
+  const house = G.create({ name: 'House', target: 40000, source: 'accounts', accounts: [{ account: 'assets:bank:savings', share: 'rest' }, { account: 'assets:bank:isa', share: 'rest' }] });
+  const trip = G.create({ name: 'Trip', target: 2000, source: 'accounts', start: 'new', accounts: [{ account: 'assets:bank:isa', share: 'percent', value: 50 }] });
+  let r = G.list(), by = (id) => r.goals.find((g) => g.id === id);
+  assert.equal(by(em.id).current, 10000); assert.equal(by(em.id).status, 'reached');
+  assert.equal(by(house.id).current, 15000 + 2000, 'the rest of savings plus what the trip leaves of the ISA');
+  assert.equal(by(trip.id).current, 0, 'only new money counts');
+  assert.equal(by(em.id).current + by(house.id).current + 2000, 29000, 'every euro counted once (2000 is the trip\'s untouched starting share)');
+  const sav = r.allocations.find((a) => a.account === 'assets:bank:savings');
+  assert.equal(sav.balance, 25000); assert.equal(sav.unallocated, 0);
+  // New money into the ISA: half goes to the trip (its 50%), half to the house.
+  store.saveTxs({ x: { acct: 'assets:bank:isa', date: t, amount: 1000, cur: 'EUR', desc: 'SAVE', text: 'SAVE' } });
+  r = G.list(); by = (id) => r.goals.find((g) => g.id === id);
+  assert.equal(by(trip.id).current, 500); assert.equal(by(house.id).current, 17500);
+  // Renaming keeps the starting point; asking for a restart moves it to now.
+  G.update(trip.id, { name: 'Trip 2026', start: 'new', source: 'accounts', accounts: [{ account: 'assets:bank:isa', share: 'percent', value: 50 }] });
+  assert.equal(G.list().goals.find((g) => g.id === trip.id).current, 500);
+  G.update(trip.id, { resetStart: true, start: 'new' }); assert.equal(G.list().goals.find((g) => g.id === trip.id).current, 0);
+  assert.throws(() => G.create({ name: 'x', target: 1, source: 'accounts', accounts: [] }), /at least one account/);
+  assert.throws(() => G.create({ name: 'x', target: 1, source: 'accounts', accounts: [{ account: 'assets:bank:nope', share: 'rest' }] }), /Unknown account/);
+  assert.throws(() => G.create({ name: 'x', target: 1, source: 'accounts', accounts: [{ account: 'assets:bank:isa', share: 'percent', value: 150 }] }), /at most 100/);
+  for (const g of [em, house, trip]) G.remove(g.id);
+});

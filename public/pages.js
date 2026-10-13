@@ -321,14 +321,23 @@ pages.goals = {
         <label>Goal<input type="text" name="name" required maxlength="60" placeholder="House deposit" value="${esc(ed?.name || '')}"></label>
         <label>Target (${esc(BASE)})<input type="number" name="target" required min="1" step="any" value="${ed?.target ?? ''}"></label>
         <label>By (optional)<input type="date" name="by" value="${esc(ed?.by || '')}"></label>
-        <label>Track<select name="source">${r.sources.map((s) => `<option value="${esc(s.id)}" ${(ed?.source || 'liquid') === s.id ? 'selected' : ''}>${esc(s.label)}</option>`).join('')}</select></label>
+        <label>Track<select name="source" id="gSource">${r.sources.map((s) => `<option value="${esc(s.id)}" ${(ed?.source || 'liquid') === s.id ? 'selected' : ''}>${esc(s.label)}</option>`).join('')}</select></label>
+        <label>Starting point<select name="start"><option value="all" ${ed?.start !== 'new' ? 'selected' : ''}>Count what is already there</option><option value="new" ${ed?.start === 'new' ? 'selected' : ''}>Only what I add from today</option></select></label>
+        ${ed?.start === 'new' ? `<label class="chk"><input type="checkbox" name="resetStart"> Restart counting from today (started ${esc(ed.startDate || '')})</label>` : ''}
+        <div id="gAccounts" style="grid-column:1/-1" ${(ed?.source || 'liquid') === 'accounts' ? '' : 'hidden'}>
+          <div class="muted" style="font-size:12px;margin-bottom:6px">Which accounts hold this goal's money? If an account also holds other goals, say how much of it is for this one.</div>
+          ${r.accounts.length ? `<div class="tbl" style="margin:0"><table><tbody>${r.accounts.map((a) => { const l = ed?.accounts?.find((x) => x.account === a.account); return `<tr><td><label class="chk row" style="margin:0"><input type="checkbox" data-acct="${esc(a.account)}" ${l ? 'checked' : ''}> ${esc(a.label)}</label></td>
+            <td><select data-share="${esc(a.account)}"><option value="rest" ${!l || l.share === 'rest' ? 'selected' : ''}>All of it (what other goals leave)</option><option value="amount" ${l?.share === 'amount' ? 'selected' : ''}>Up to an amount</option><option value="percent" ${l?.share === 'percent' ? 'selected' : ''}>A percentage</option></select></td>
+            <td><input type="number" data-val="${esc(a.account)}" min="0" step="any" style="width:110px" value="${l?.value ?? ''}" placeholder="${l?.share === 'percent' ? '%' : esc(BASE)}" ${!l || l.share === 'rest' ? 'hidden' : ''}></td></tr>`; }).join('')}</tbody></table></div>` : '<p class="empty">No accounts yet: connect a bank, import a statement or add an asset first.</p>'}
+        </div>
         <label>Monthly saving (blank = your real pace)<input type="number" name="monthly" step="any" value="${ed?.monthly ?? ''}" placeholder="auto"></label>
         <label>Expected yearly return %<input type="number" name="growth" step="0.1" min="-50" max="50" value="${ed?.growth || ''}" placeholder="0"></label>
         <div class="row"><button class="btn primary">${ed ? 'Save goal' : 'Add goal'}</button>${ed || gs.length ? '<button type="button" class="btn" id="goalCancel">Cancel</button>' : ''}</div></form>`;
     el.innerHTML = `
       ${card('Savings goals', 'Set a target, optionally a date, and the balance it tracks. Progress comes from your real balances; the projection continues the pace you have actually been saving at.', form + (gs.length ? '' : '<p class="empty">No goals yet. Add your first one above, for example an emergency fund of three months of spending.</p>'), gs.length ? '<button class="btn primary sm" id="goalAdd">+ Add goal</button>' : '')}
+      ${r.allocations.length ? card('Where your goal money sits', 'How each account is divided between the goals that use it, as of today.', `<div class="tbl" style="margin:0"><table><thead><tr><th>Account</th><th class="n">Balance</th><th>Goals</th><th class="n">Not earmarked</th></tr></thead><tbody>${r.allocations.map((a) => `<tr><td>${esc(a.label)}</td><td class="n">${money(a.balance)}</td><td>${a.parts.map((p) => `${esc(p.name)} <b>${money(p.amount)}</b> <span class="muted">(${p.share === 'rest' ? 'what is left' : p.share === 'amount' ? `up to ${money(p.value)}` : `${p.value}%`})</span>`).join('<br>')}${a.short ? `<div class="bad" style="font-size:12px">Short by ${money(a.short)}: the amounts earmarked add up to more than the balance.</div>` : ''}</td><td class="n">${a.unallocated ? money(a.unallocated) : '—'}</td></tr>`).join('')}</tbody></table></div>`) : ''}
       ${gs.length ? `<div class="banner"><span><b>Monthly check</b> · ${ch.mode === 'off' ? 'off' : `every goal is checked at the start of each month${last ? `; last checked ${esc(new Date(last.at).toLocaleDateString())}` : ''}`}</span><span class="row"><label class="chk row" style="margin:0"><input type="checkbox" id="gcMode" ${ch.mode !== 'off' ? 'checked' : ''}> Monthly</label><button class="btn sm" id="gcNow">Check now</button></span></div>` : ''}
-      ${gs.map((g) => { const [cls, label] = GOAL_STATUS[g.status], rec = record(g.id); return card(`${esc(g.name)} <span class="pill ${cls}" style="margin-left:8px;vertical-align:middle">${label}</span>`, `${esc(g.sourceLabel)}${g.by ? ` · by ${esc(monthName(g.deadlineMonth))}` : ''}`,
+      ${gs.map((g) => { const [cls, label] = GOAL_STATUS[g.status], rec = record(g.id); return card(`${esc(g.name)} <span class="pill ${cls}" style="margin-left:8px;vertical-align:middle">${label}</span>`, `${esc(g.sourceLabel)}${g.start === 'new' ? ` · counting from ${esc(g.startDate)}` : ''}${g.by ? ` · by ${esc(monthName(g.deadlineMonth))}` : ''}`,
         `<div class="row" style="justify-content:space-between;margin-bottom:6px"><span><b>${money(g.current)}</b> <span class="muted">of ${money(g.target)}</span></span><span class="muted">${g.pct}%</span></div>
          <div class="track" style="height:8px;margin-bottom:12px" role="progressbar" aria-valuenow="${g.pct}" aria-valuemin="0" aria-valuemax="100" aria-label="${esc(g.name)} progress"><div class="fill" style="width:${g.pct}%;background:var(--s1)"></div></div>
          <p style="margin:0 0 12px;font-size:13px">${goalSentence(g)}</p>
@@ -338,7 +347,7 @@ pages.goals = {
     for (const g of gs) {
       const pts = g.points, idx = (m) => pts.findIndex((p) => p.month === m), now = pts.map((p) => p.actual != null).lastIndexOf(true); // this month: the last one with a real balance
       const series = [{ name: 'Saved', color: 'var(--s1)', points: pts.map((p) => ({ x: p.month, y: p.actual })) }];
-      if (pts.some((p, i) => i > now && p.projected != null)) series.push({ name: g.monthly == null ? 'Projected at your pace' : 'Projected', color: 'var(--s1)', dash: true, points: pts.map((p) => ({ x: p.month, y: p.projected })) });
+      if (g.status !== 'reached' && pts.some((p, i) => i > now && p.projected != null)) series.push({ name: g.monthly == null ? 'Projected at your pace' : 'Projected', color: 'var(--s1)', dash: true, points: pts.map((p) => ({ x: p.month, y: p.projected })) });
       if (pts.some((p, i) => i > now && p.needed != null)) series.push({ name: 'Needed to hit the date', color: 'var(--s2)', dash: true, points: pts.map((p) => ({ x: p.month, y: p.needed })) });
       const marks = [{ i: now, label: 'Today' }]; if (g.deadlineMonth && idx(g.deadlineMonth) > now) marks.push({ i: idx(g.deadlineMonth), label: 'Deadline' });
       lineChart($(`#gc-${g.id}`, el), { series, fmtX: (m) => keyLabel(m), refs: [{ y: g.target, label: `Target ${money(g.target)}` }], marks, height: 230 });
@@ -347,11 +356,15 @@ pages.goals = {
     if ($('#gcMode', el)) $('#gcMode', el).onchange = async (e) => { await run(() => api('/api/goals/checks/mode', 'POST', { mode: e.target.checked ? 'monthly' : 'off' }), e.target.checked ? 'Monthly checks on' : 'Monthly checks off'); go(); };
     if ($('#gcNow', el)) $('#gcNow', el).onclick = async () => { await run(() => api('/api/goals/checks', 'POST', {}), 'Goals checked'); go(); };
     const f = $('#goalForm', el);
+    $('#gSource', el).onchange = (e) => { $('#gAccounts', el).hidden = e.target.value !== 'accounts'; };
+    $$('[data-share]', el).forEach((s) => (s.onchange = () => { const v = $(`[data-val="${CSS.escape(s.dataset.share)}"]`, el); v.hidden = s.value === 'rest'; v.placeholder = s.value === 'percent' ? '%' : BASE; }));
     if ($('#goalAdd', el)) $('#goalAdd', el).onclick = () => { goalUi.editing = null; goalUi.adding = true; go(); };
     if ($('#goalCancel', el)) $('#goalCancel', el).onclick = () => { goalUi.editing = null; goalUi.adding = false; go(); };
     f.onsubmit = async (e) => {
       e.preventDefault();
       const body = Object.fromEntries(new FormData(f));
+      body.resetStart = !!body.resetStart;
+      if (body.source === 'accounts') body.accounts = $$('[data-acct]', el).filter((c) => c.checked).map((c) => ({ account: c.dataset.acct, share: $(`[data-share="${CSS.escape(c.dataset.acct)}"]`, el).value, value: $(`[data-val="${CSS.escape(c.dataset.acct)}"]`, el).value }));
       if (ed) await run(() => api(`/api/goals/${ed.id}`, 'PUT', body), 'Goal saved'); else await run(() => api('/api/goals', 'POST', body), 'Goal added');
       goalUi.editing = null; goalUi.adding = false; go();
     };

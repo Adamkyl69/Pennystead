@@ -137,6 +137,17 @@ Everything lives in `data/`, so backing up means copying it safely. *Settings â†
   settings are kept as they are. A restore replaces the contents of `data/`, so anything else you keep in that folder is replaced too (it is in the safety copy).
   CLI: `node cli.js backup`, `node cli.js backups`, `node cli.js restore <file>`.
 
+## Savings goals
+Goals page: a target, an optional date, and what it tracks: liquid net worth, net worth, or specific accounts.
+- **Several accounts per goal**, and **one account shared by several goals**: each goal takes "up to an amount",
+  "a percentage" or "what is left" of an account. Percentages come first, then fixed amounts in goal order, then the
+  rest is shared equally by the "what is left" goals, so the same money is never counted twice. "Where your goal money
+  sits" shows how each account is divided.
+- **Starting point**: count what is already there, or only what you add from the day the goal is set up.
+- Progress uses your real month-end balances; the projection continues your pace of the last 6 months (or a monthly
+  amount you set, with an optional yearly return). Each goal says on track / behind / reached and the monthly amount
+  needed for its deadline, and is checked automatically at the start of every month (track record on the Goals page).
+
 ## Chat with your data (MCP)
 The installed app is its own MCP server: run `Pennystead --mcp` (add `--write` to allow recording valuations, `--data-dir <dir>` for a custom data folder). The easiest route is Settings â†’ **Chat with AI**, which shows the exact config for your install to paste into Claude Desktop, or a one-line command for Claude Code. From source: `node mcp.js` (Node 20+); it reads the same data folder as the app.
 **Guided reviews:** the server also offers MCP prompts, which Claude Desktop shows in its + menu under Pennystead: Monthly money review, Find money I am wasting, Budget check-up, Net worth report and Tidy up my categories.
