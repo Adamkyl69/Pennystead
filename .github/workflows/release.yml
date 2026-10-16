@@ -52,7 +52,12 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           mkdir dmgroot && ditto -x -k release/Pennystead-*-macos-*.zip dmgroot
-          hdiutil create -volname Pennystead -srcfolder dmgroot -ov -format UDZO "release/Pennystead-$(node -p "require('./package.json').version")-${{ matrix.name }}.dmg"
+          # hdiutil sometimes sizes a -srcfolder image too small ("No space left on device");
+          # give it the folder size plus headroom, and retry once with more if it still fails.
+          dmg="release/Pennystead-$(node -p "require('./package.json').version")-${{ matrix.name }}.dmg"
+          mb=$(( $(du -sm dmgroot | cut -f1) + 50 ))
+          hdiutil create -volname Pennystead -srcfolder dmgroot -size ${mb}m -ov -format UDZO "$dmg" \
+            || hdiutil create -volname Pennystead -srcfolder dmgroot -size $(( mb * 2 ))m -ov -format UDZO "$dmg"
 
       - name: Checksums
         shell: bash
