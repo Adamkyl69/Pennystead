@@ -5,7 +5,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { paths, DATA_DIR, PACKAGED, loadConfig, writeAtomic, saveConfig } = require('./lib/config');
 const { eb, configured } = require('./lib/eb');
-const { sync } = require('./lib/sync');
+const { sync, coverage } = require('./lib/sync');
 const { updatePrices } = require('./lib/prices');
 const core = require('./lib/core');
 const goals = require('./lib/goals');
@@ -38,7 +38,7 @@ async function readBody(req) {
 }
 
 let pendingState = null, syncing = null;
-const runSync = () => (syncing ??= sync().finally(() => (syncing = null)));
+const runSync = (opts) => (syncing ??= sync(opts).finally(() => (syncing = null)));
 
 async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT || 3456, host = process.env.PENNYSTEAD_HOST || '127.0.0.1' } = {}) {
   const exposed = !security.loopback(host);
@@ -56,7 +56,7 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
     if (!q.code || !pendingState || q.state !== pendingState) throw HttpError(400, 'This link does not match the connection you started (or it was already used). Start again from Settings → Banks.');
     pendingState = null;
     writeAtomic(paths.session, JSON.stringify(await eb('POST', '/sessions', { code: q.code }), null, 2), { mode: 0o600 });
-    await runSync().catch((e) => console.error('initial sync failed:', e.message));
+    await runSync({ full: true }).catch((e) => console.error('initial sync failed:', e.message)); // right after approval is when banks allow the most history
   }
   const GOOGLE_REDIRECT = `http://localhost:${port}/oauth/google/callback`;
 
@@ -113,7 +113,7 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
 
       // ----- app state & data -----
       if (P === '/api/state') {
-        const accounts = Object.values(store.accounts()).map((a) => ({ name: a.name, label: a.label, currency: a.currency, lastSync: a.lastSync || null, imported: !!a.imported, iban: a.iban ? a.iban.slice(-4) : null }));
+        const all = store.txs(), accounts = Object.values(store.accounts()).map((a) => ({ name: a.name, label: a.label, currency: a.currency, lastSync: a.lastSync || null, imported: !!a.imported, iban: a.iban ? a.iban.slice(-4) : null, history: coverage('assets:bank:' + a.name, all) }));
         return json(res, 200, { ...(await core.state()), goalCheck: goalChecks.unseen(), connectPending: !!pendingState, version: VERSION, packaged: PACKAGED, dataDir: DATA_DIR, authRequired: auth.required(), hasData: !demo.isEmpty(), canConnect: configured(), canPrices: !!settings.alphaVantage(), demo: demo.isDemo(), accounts, redirectUrl: redirectUrl(), port });
       }
       if (P === '/api/overview') return json(res, 200, await core.overview());
@@ -209,7 +209,7 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
         c.bankRedirect = url || null; saveConfig(c);
         return json(res, 200, { redirectUrl: redirectUrl() });
       }
-      if (P === '/api/sync' && METHOD === 'POST') { notInDemo(); return json(res, 200, await runSync()); }
+      if (P === '/api/sync' && METHOD === 'POST') { notInDemo(); const b = await readBody(req).catch(() => ({})); return json(res, 200, await runSync({ full: b?.full === true })); }
       if (P === '/api/prices' && METHOD === 'POST') return json(res, 200, await updatePrices());
       if (P === '/api/disconnect' && METHOD === 'POST') { fs.rmSync(paths.session, { force: true }); return json(res, 200, {}); }
 

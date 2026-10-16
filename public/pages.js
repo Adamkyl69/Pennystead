@@ -449,16 +449,28 @@ pages.banks = {
   title: 'Banks',
   async render(el) {
     const mask = (s) => (s ? `••••${esc(s.slice(-4))}` : '—');
+    const mon = (m) => new Date(m.slice(0, 7) + '-01T00:00:00Z').toLocaleDateString(undefined, { month: 'short', year: 'numeric', timeZone: 'UTC' });
+    // Consecutive empty months read as one range: "Dec 2025 – Sep 2026".
+    const gapText = (g) => { const out = []; for (const m of g) { const l = out[out.length - 1], d = new Date(m + '-01T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() - 1); if (l && l[1] === d.toISOString().slice(0, 7)) l[1] = m; else out.push([m, m]); } return out.map(([a, b]) => (a === b ? mon(a) : `${mon(a)} – ${mon(b)}`)).join(', '); };
+    const histCell = (h) => (!h?.count ? '<span class="muted">none yet</span>' : `${esc(mon(h.first))} – ${esc(mon(h.last))} <span class="muted">· ${h.count} transactions</span>${h.gaps.length ? ` <span class="warn">· ${h.gaps.length} empty month${h.gaps.length > 1 ? 's' : ''}</span>` : ''}`);
+    const gapped = (ST.accounts || []).filter((a) => !a.imported && a.history?.gaps?.length);
     el.innerHTML = `
       ${ST.demo ? '<div class="banner"><span>You are looking at generated demo data. Nothing here is real.</span></div>' : ''}
       ${card('Bank connection', ST.connected ? `${esc(ST.bank?.name || 'Connected')} · consent valid until ${esc((ST.validUntil || '').slice(0, 10))}` : 'Connect through Enable Banking (read-only access to balances and transactions).',
-        ST.connected ? `<div class="tbl" style="margin:0"><table><thead><tr><th>Account</th><th>Number</th><th>Currency</th><th>Last sync</th></tr></thead><tbody>${(ST.accounts || []).map((a) => `<tr><td>${esc(a.label || a.name)}</td><td class="muted">${mask(a.iban)}</td><td>${esc(a.currency || '')}</td><td class="muted">${a.imported ? 'imported file' : esc(a.lastSync || '—')}</td></tr>`).join('')}</tbody></table></div>
-          <div class="row" style="margin-top:12px"><button class="btn primary" id="syncNow">Sync now</button><button class="btn danger" id="off">Disconnect</button></div>`
+        ST.connected ? `<div class="tbl" style="margin:0"><table><thead><tr><th>Account</th><th>Number</th><th>Currency</th><th>History</th><th>Last sync</th></tr></thead><tbody>${(ST.accounts || []).map((a) => `<tr><td>${esc(a.label || a.name)}</td><td class="muted">${mask(a.iban)}</td><td>${esc(a.currency || '')}</td><td>${histCell(a.history)}</td><td class="muted">${a.imported ? 'imported file' : esc(a.lastSync || '—')}</td></tr>`).join('')}</tbody></table></div>
+          ${gapped.length ? `<div class="banner" style="margin-top:12px"><span><b>Some months have no transactions.</b> ${gapped.map((a) => `${esc(a.label || a.name)}: ${esc(gapText(a.history.gaps))}`).join(' · ')}. The bank may have sent only part of your history. Try <b>Fetch full history</b>. If the months are still empty, banks often release older history only in the first minutes after you approve access: <b>Disconnect</b>, connect again, and Pennystead fetches everything straight away. You can also <a href="#/import">import a statement file</a> for those months into the same account (duplicates are skipped).</span></div>` : ''}
+          <div class="row" style="margin-top:12px"><button class="btn primary" id="syncNow">Sync now</button><button class="btn" id="syncFull">Fetch full history</button><button class="btn danger" id="off">Disconnect</button></div>`
         : ST.demo ? '<p class="empty">Demo mode: connecting is disabled.</p>' : ST.canConnect ? `<div class="row"><select id="country">${['FI', 'SE', 'NO', 'DK', 'DE', 'FR', 'GB', 'NL', 'ES', 'IT', 'PL', 'EE', 'LV', 'LT', 'TR'].map((c) => `<option>${c}</option>`).join('')}</select><select id="bank" style="min-width:240px"></select><button class="btn primary" id="go">Connect</button></div><p class="muted">You will approve read-only access at your bank, then return here.</p>`
         : '<p class="empty">To connect a bank, first add your Enable Banking credentials. <a href="#/connections">Set up in Connections →</a></p>')}
       ${!ST.connected && ST.connectPending ? card('Finish connecting', 'Approved access at your bank but did not come back here? Copy the full address from your browser\'s address bar on the page you ended on, and paste it below.', '<form id="finForm" class="row"><input type="text" name="url" placeholder="https://…?code=…&amp;state=…" style="min-width:320px;flex:1" required><button class="btn primary">Finish</button></form>') : ''}
       ${card('Prices &amp; exchange rates', ST.canPrices ? 'Alpha Vantage key saved.' : 'Add a free Alpha Vantage key in <a href="#/connections">Connections</a> to fetch stock prices and exchange rates.', '<button class="btn" id="px">Update prices now</button>')}`;
     if ($('#syncNow', el)) $('#syncNow', el).onclick = async () => { const r = await run(() => api('/api/sync', 'POST')); toast(`Synced: ${r.reduce((s, x) => s + x.added, 0)} new`); go(); };
+    if ($('#syncFull', el)) $('#syncFull', el).onclick = async () => {
+      const r = await run(() => api('/api/sync', 'POST', { full: true }));
+      const added = r.reduce((s, x) => s + x.added, 0), left = r.filter((x) => x.gaps?.length);
+      toast(left.length ? `Fetched ${added} more transactions. Some months are still empty: the bank did not send them.` : `Fetched ${added} more transactions. No empty months.`);
+      go();
+    };
     if ($('#off', el)) $('#off', el).onclick = async () => { if (confirm('Disconnect? Your history stays; syncing stops until you reconnect.')) { await api('/api/disconnect', 'POST'); go(); } };
     if ($('#go', el)) {
       const load = async () => { $('#bank', el).innerHTML = '<option>Loading…</option>'; try { const b = await api('/api/banks?country=' + $('#country', el).value); $('#bank', el).innerHTML = b.map((x) => `<option>${esc(x.name)}</option>`).join(''); } catch (e) { toast(e.message); } };
