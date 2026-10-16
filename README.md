@@ -152,6 +152,16 @@ Goals page: a target, an optional date, and what it tracks: liquid net worth, ne
   amount you set, with an optional yearly return). Each goal says on track / behind / reached and the monthly amount
   needed for its deadline, and is checked automatically at the start of every month (track record on the Goals page).
 
+## AI inside Pennystead (OpenRouter)
+
+Add an [OpenRouter](https://openrouter.ai) API key and a model id (for example `anthropic/claude-haiku-4.5`; any model on openrouter.ai/models with tool calling works) under *Settings → Connections → AI*, then press **Test**. You pay OpenRouter per use.
+
+- **Chat with AI:** ask about your money in plain language, or start a guided review (monthly review, find savings, goals, budgets, net worth). The model looks things up with the same read-only tools Claude Desktop uses, so answers come from your real data. It cannot change anything. The conversation is not saved.
+- **Import → Let AI read this file:** for statements Pennystead cannot map by itself (title rows, account details on top, separate in/out columns, unusual headers in any language), the AI says where the table starts and which column is what. You check the columns and the preview before anything is imported.
+- **Import → Categorize with AI:** merchants your rules do not know get one of *your* categories (never a made-up one); you see them marked ✦ in the preview and can change them later.
+
+**What is sent:** your question and the figures the model asks for (account and card numbers masked); for imports, the first rows of the file; for categories, merchant names only (no amounts). It goes to OpenRouter and the model's provider under their terms, and only when you use an AI feature.
+
 ## Chat with your data (MCP)
 The installed app is its own MCP server: run `Pennystead --mcp` (add `--write` to allow recording valuations, `--data-dir <dir>` for a custom data folder). The easiest route is Settings → **Chat with AI**, which shows the exact config for your install to paste into Claude Desktop, or a one-line command for Claude Code. From source: `node mcp.js` (Node 20+); it reads the same data folder as the app.
 **Guided reviews:** the server also offers MCP prompts, which Claude Desktop shows in its + menu under Pennystead: Monthly money review, Find money I am wasting, Budget check-up, Net worth report and Tidy up my categories.

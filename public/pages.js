@@ -658,10 +658,11 @@ function impMap(el) {
   const acct = imp.account, selAcct = d.accounts.find((a) => a.uid === acct);
   el.innerHTML = `
     <div class="crumb"><a id="back">← Choose another file</a></div>
+    ${d.ai ? `<div class="banner"><span><b>AI read this file.</b> ${esc(d.ai.notes || 'Columns set below.')} Check the columns, then preview: nothing is imported until you confirm.</span></div>` : ''}
     ${card(esc(d.filename), `${d.kind === 'xlsx' ? 'Excel workbook' : `CSV · ${esc(d.encoding)} · delimiter “${d.delimiter === '\t' ? 'tab' : esc(d.delimiter)}”`} · ${d.rowCount} data rows${d.fromProfile ? ' · <span class="good">using the mapping you saved for this layout</span>' : ''}`, `
       <div class="row" style="margin-bottom:12px">
         ${d.sheets ? `<label class="muted">Sheet</label><select id="sheet">${d.sheets.map((n, i) => `<option value="${i}" ${i === d.sheet ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>` : `<label class="muted">Delimiter</label><select id="delim">${[[',', 'comma ,'], [';', 'semicolon ;'], ['\t', 'tab'], ['|', 'pipe |']].map(([v, l]) => `<option value="${v}" ${d.delimiter === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`}
-        <label class="muted" style="margin-left:10px">Header is on row</label><input type="number" id="hrow" min="0" value="${d.headerRow}" style="width:70px"><span class="muted" style="font-size:12px">(rows above it, such as account info, are ignored; 0 = the file has no header row)</span></div>
+        <label class="muted" style="margin-left:10px">Header is on row</label><input type="number" id="hrow" min="0" value="${d.headerRow}" style="width:70px"><span class="muted" style="font-size:12px">(rows above it, such as account info, are ignored; 0 = the file has no header row)</span>${ST.ai ? '<span class="right"><button type="button" class="btn" id="aiMap" title="Sends the first rows of this file to your AI model">✦ Let AI read this file</button></span>' : ''}</div>
       <div class="tbl" style="margin:0"><table><thead><tr>${d.headers.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${d.sample.map((r) => `<tr>${r.map((c) => `<td class="muted" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`)}
     <form id="mapForm">
     ${card('Where should these go?', 'Pick the account the transactions belong to.', `<div class="form">
@@ -698,6 +699,11 @@ function impMap(el) {
   form.onchange = (e) => { if (e.target.name === 'account') { impCollect(form); imp.d.mapping = { ...imp.mapping }; go(); return; } sync(); }; sync();
   $('#back', el).onclick = () => { imp.step = 'upload'; imp.d = null; go(); };
   const reparse = async (patch) => { imp.d = await run(() => api('/api/import/reparse', 'POST', { importId: d.importId, ...patch })); go(); };
+  if ($('#aiMap', el)) $('#aiMap', el).onclick = async (e) => {
+    e.target.disabled = true; e.target.textContent = 'AI is reading the file…';
+    try { imp.d = await api('/api/import/ai-map', 'POST', { importId: d.importId }); toast('Columns set by AI. Check them below.'); } catch (er) { toast(er.message); }
+    go();
+  };
   if ($('#sheet', el)) $('#sheet', el).onchange = (e) => reparse({ sheet: +e.target.value });
   if ($('#delim', el)) $('#delim', el).onchange = (e) => reparse({ delimiter: e.target.value, headerRow: +$('#hrow', el).value });
   $('#hrow', el).onchange = (e) => reparse({ headerRow: +e.target.value, sheet: d.sheet ?? undefined, delimiter: d.delimiter ?? undefined });
@@ -746,8 +752,10 @@ function impPreview(el) {
       ${c.possible_duplicate ? `<label class="chk row" style="margin:6px 0"><input type="checkbox" id="oPoss" ${imp.opts.includePossible ? 'checked' : ''}> Also import the ${c.possible_duplicate} possible duplicate(s) (same date and amount as an existing transaction, different text)</label>` : ''}
       ${c.overlap ? `<label class="chk row" style="margin:6px 0"><input type="checkbox" id="oOver" ${imp.opts.includeOverlap ? 'checked' : ''}> Also import the ${c.overlap} row(s) that fall inside the period your bank already syncs</label>` : ''}
       ${p.balance ? `<p class="muted" style="margin:8px 0 0;font-size:13px">${p.balance.used ? `Account balance will be set to <b>${money(p.balance.value, cur, { d: 2 })}</b> as of ${esc(p.balance.date)} (${p.balance.source === 'column' ? 'from the Balance column' : 'as you entered'}).` : `<span class="warn">The balance in this file (${money(p.balance.value, cur, { d: 2 })} on ${esc(p.balance.date)}) is older than your latest data, so it is ignored and today's balance is kept.</span>`}</p>` : p.account.isNew ? '<p class="muted" style="margin:8px 0 0;font-size:13px">No balance given: the account balance will be the sum of these transactions (starting from zero). Go back and enter a balance to start from a real figure.</p>' : ''}
+      ${p.aiCategorized ? `<p class="muted" style="margin:8px 0 0;font-size:13px"><span class="good">✦</span> AI categorized ${p.aiCategorized} transaction${p.aiCategorized === 1 ? '' : 's'} (marked ✦ below). You can change any of them later.</p>` : ''}
+      ${ST.ai && p.uncategorized ? `<div class="row" style="margin:10px 0 0"><button class="btn" id="aiCats" title="Sends the merchant names (not amounts) to your AI model">✦ Categorize ${p.uncategorized} with AI</button><span class="muted" style="font-size:12px">${p.aiTried ? 'The AI left these: it could not tell, or they did not fit your categories.' : 'Your rules do not cover these yet; AI picks from your own categories.'}</span></div>` : ''}
       ${p.unmappedCategories ? `<p class="muted" style="margin:8px 0 0;font-size:12px">${p.unmappedCategories} category value(s) in your file did not match one of your categories; your rules categorize those.</p>` : ''}</div>
-    ${card('Preview', `First ${p.sample.length} rows. Categories come from your rules and can be changed afterwards.`, `<div class="tbl" style="margin:0"><table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Status</th><th class="n">Amount</th></tr></thead><tbody>${p.sample.map((r) => `<tr style="${r.include ? '' : 'opacity:.5'}"><td class="muted" style="white-space:nowrap">${esc(r.date)}</td><td>${esc(r.desc)}</td><td class="muted">${esc(catLabel(r.category))}</td><td><span class="pill ${IMP_STATUS[r.status][1]}">${IMP_STATUS[r.status][0]}</span></td><td class="n ${r.amount < 0 ? '' : 'good'}">${money2(r.amount, cur)}</td></tr>`).join('')}</tbody></table></div>`)}
+    ${card('Preview', `First ${p.sample.length} rows. Categories come from your rules and can be changed afterwards.`, `<div class="tbl" style="margin:0"><table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Status</th><th class="n">Amount</th></tr></thead><tbody>${p.sample.map((r) => `<tr style="${r.include ? '' : 'opacity:.5'}"><td class="muted" style="white-space:nowrap">${esc(r.date)}</td><td>${esc(r.desc)}</td><td class="muted">${r.ai ? '<span class="good" title="Chosen by AI">✦</span> ' : ''}${esc(catLabel(r.category))}</td><td><span class="pill ${IMP_STATUS[r.status][1]}">${IMP_STATUS[r.status][0]}</span></td><td class="n ${r.amount < 0 ? '' : 'good'}">${money2(r.amount, cur)}</td></tr>`).join('')}</tbody></table></div>`)}
     ${p.errors.length ? card(`Rows with problems (${c.errors})`, 'These rows are skipped. Fix the mapping above or correct the file if they should be included.', `<div class="tbl" style="margin:0"><table><tbody>${p.errors.map((e) => `<tr><td class="muted" style="width:70px">row ${e.line}</td><td class="bad" style="width:36%">${esc(e.error)}</td><td class="muted">${esc(e.values)}</td></tr>`).join('')}</tbody></table></div>`) : ''}
     <div class="row" style="margin-bottom:24px"><button class="btn primary" id="commit" ${c.toImport ? '' : 'disabled'}>Import ${c.toImport} transaction${c.toImport === 1 ? '' : 's'}</button><button class="btn" id="back2">Back</button></div>`;
   $('#back', el).onclick = $('#back2', el).onclick = () => { imp.d.mapping = { ...imp.mapping }; imp.step = 'map'; go(); };
@@ -762,6 +770,11 @@ function impPreview(el) {
     if (f === 'flip') m.invert = !m.invert;
     impRunPreview();
   }));
+  if ($('#aiCats', el)) $('#aiCats', el).onclick = async (e) => {
+    e.target.disabled = true; e.target.textContent = 'AI is categorizing…';
+    try { const r = await api('/api/import/ai-categories', 'POST', { importId: imp.d.importId, mapping: imp.mapping, account: impAccountBody(), options: impOptions() }); toast(r.asked ? `AI categorized ${r.categorized} of ${r.asked} merchants` : 'Nothing left to categorize'); } catch (er) { toast(er.message); e.target.disabled = false; e.target.textContent = 'Try AI again'; return; }
+    impRunPreview();
+  };
   if ($('#oPoss', el)) $('#oPoss', el).onchange = (e) => { imp.opts.includePossible = e.target.checked; impRunPreview(); };
   if ($('#oOver', el)) $('#oOver', el).onchange = (e) => { imp.opts.includeOverlap = e.target.checked; impRunPreview(); };
   $('#commit', el).onclick = async (e) => {
@@ -780,17 +793,68 @@ function impDone(el) {
 }
 
 // ---------- Connections (credentials) ----------
+// Safe little markdown for AI answers: everything is escaped first; then headings, lists, tables, bold, code.
+function md(src) {
+  const inline = (t) => esc(t).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/(^|[\s(])\*([^*\s][^*]*)\*(?=[\s).,;:!?]|$)/g, '$1<i>$2</i>');
+  const out = [], lines = String(src || '').replace(/\r/g, '').split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (/^```/.test(l)) { const code = []; while (++i < lines.length && !/^```/.test(lines[i])) code.push(lines[i]); out.push(`<pre style="padding:10px;background:var(--card2);border-radius:8px;overflow:auto;font-size:12px">${esc(code.join('\n'))}</pre>`); continue; }
+    if (/^\s*\|.*\|\s*$/.test(l)) {
+      const rows = []; for (; i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i]); i++) rows.push(lines[i]); i--;
+      const cells = (r) => r.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+      const body = rows.filter((r) => !/^\s*\|[\s:|-]+\|\s*$/.test(r)).map(cells), num = (c) => /^[-+]?[\d\s.,€$£%()-]+[A-Z]{0,3}$/.test(c);
+      out.push(`<div class="tbl" style="margin:6px 0"><table>${body.map((r, k) => `<tr>${r.map((c) => (k === 0 ? `<th>${inline(c)}</th>` : `<td class="${num(c) ? 'n' : ''}">${inline(c)}</td>`)).join('')}</tr>`).join('')}</table></div>`); continue;
+    }
+    const h = l.match(/^(#{1,4})\s+(.*)/); if (h) { out.push(`<div style="font-weight:600;margin:10px 0 4px">${inline(h[2])}</div>`); continue; }
+    if (/^\s*([-*•]|\d+[.)])\s+/.test(l)) {
+      const ordered = /^\s*\d/.test(l), items = [];
+      for (; i < lines.length && /^\s*([-*•]|\d+[.)])\s+/.test(lines[i]); i++) items.push(lines[i].replace(/^\s*([-*•]|\d+[.)])\s+/, '')); i--;
+      out.push(`<${ordered ? 'ol' : 'ul'} style="margin:4px 0;padding-left:20px">${items.map((x) => `<li>${inline(x)}</li>`).join('')}</${ordered ? 'ol' : 'ul'}>`); continue;
+    }
+    out.push(l.trim() ? `<p style="margin:4px 0">${inline(l)}</p>` : '');
+  }
+  return out.join('');
+}
+const TOOL_LABEL = { net_worth: 'net worth', overview: 'overview', net_worth_history: 'net worth history', manual_assets: 'assets', monthly_summary: 'monthly totals', spending_by_category: 'spending by category', budget_status: 'budgets', search_transactions: 'transactions', subscriptions: 'subscriptions', goals: 'goals', goal_checks: 'goal history', review_queue: 'uncategorized merchants', anomalies: 'unusual charges', hledger_query: 'ledger report' };
+const chat = { messages: [], busy: false, prompts: null }; // kept while the app is open; never stored on disk
+
 pages.chat = {
   title: 'Chat with AI',
   async render(el) {
     const [c, prompts] = await Promise.all([api('/api/mcp-config'), api('/api/mcp-prompts')]);
-    el.innerHTML = `
-      <p class="muted" style="margin:0 0 16px">Pennystead can answer questions about your money through Claude, using your own Claude Desktop or Claude Code. Claude runs a small Pennystead helper on this computer; nothing is sent anywhere until you ask Claude something, and then only the answers it needs go to Claude. Names, IBANs and long numbers are masked by default.</p>
-      ${card('Claude Desktop', 'Open Claude Desktop → Settings → Developer → Edit Config, add this, save, and restart Claude Desktop. If the file already has "mcpServers", add just the "pennystead" entry inside it.', `<pre style="margin:0 0 10px;padding:12px;background:var(--card2);border-radius:8px;overflow:auto;font-size:12px">${esc(c.desktop)}</pre><button type="button" class="btn sm" data-copy="${esc(c.desktop)}">Copy</button>`)}
+    if (ST.ai && !chat.prompts) chat.prompts = await api('/api/ai/prompts').catch(() => []);
+    const claude = `      ${card('Claude Desktop', 'Open Claude Desktop → Settings → Developer → Edit Config, add this, save, and restart Claude Desktop. If the file already has "mcpServers", add just the "pennystead" entry inside it.', `<pre style="margin:0 0 10px;padding:12px;background:var(--card2);border-radius:8px;overflow:auto;font-size:12px">${esc(c.desktop)}</pre><button type="button" class="btn sm" data-copy="${esc(c.desktop)}">Copy</button>`)}
       ${card('Claude Code', 'Run this once in a terminal.', `<pre style="margin:0 0 10px;padding:12px;background:var(--card2);border-radius:8px;overflow:auto;font-size:12px">${esc(c.claudeCode)}</pre><button type="button" class="btn sm" data-copy="${esc(c.claudeCode)}">Copy</button>`)}
       ${card('Guided reviews', 'One click in Claude Desktop: open the + menu in a new chat, choose Pennystead, and pick a review. Claude fetches what it needs and writes it up.', `<div class="tbl" style="margin:0"><table><tbody>${prompts.map((p) => `<tr><td style="white-space:nowrap"><b>${esc(p.title)}</b></td><td class="muted">${esc(p.description)}</td></tr>`).join('')}</tbody></table></div>`)}
       ${card('Or just ask', '', '<ul class="muted" style="margin:0;padding-left:18px;line-height:1.8"><li>What is my net worth, and how has it changed this year?</li><li>Which subscriptions have gone up in price?</li><li>Did anything unusual happen in my spending last month?</li><li>Am I on track with my budgets?</li></ul>')}
       <p class="muted" style="font-size:12px">Read-only by default. Add <code>--write</code> to the arguments to also let Claude record a new value for a manual asset (for example "my car is worth 15,500 now").</p>`;
+    const bubble = (m) => m.role === 'user'
+      ? `<div style="display:flex;justify-content:flex-end;margin:10px 0"><div style="max-width:80%;background:var(--accent,#2563eb);color:#fff;padding:8px 12px;border-radius:12px 12px 2px 12px;white-space:pre-wrap">${esc(m.label || m.content)}</div></div>`
+      : `<div style="margin:10px 0;max-width:92%"><div style="background:var(--card2);padding:10px 14px;border-radius:12px 12px 12px 2px">${m.error ? `<span class="bad">${esc(m.content)}</span>` : md(m.content)}</div>${m.steps?.length ? `<div class="muted" style="font-size:11px;margin:4px 2px">Looked at: ${[...new Set(m.steps.map((s) => TOOL_LABEL[s.tool] || s.tool))].map(esc).join(', ')}</div>` : ''}</div>`;
+    const chatHtml = !ST.ai ? card('Chat with your data', 'Ask questions about your money in plain language.', '<p class="muted" style="margin:0 0 10px">Add an OpenRouter API key and a model under <a href="#/connections">Settings → Connections</a> to chat right here. Or connect Claude Desktop below.</p><a class="btn primary" href="#/connections">Set up AI</a>')
+      : card('Chat with your data', `Model <code>${esc(ST.ai.model)}</code> via OpenRouter · read-only: it looks things up, it cannot change anything.`, `
+        <div id="log" style="max-height:60vh;overflow:auto;margin-bottom:10px">${chat.messages.length ? chat.messages.map(bubble).join('') : `<p class="muted" style="margin:4px 0 10px">Try a guided review, or ask anything: <i>"How much did I spend on restaurants this year?"</i>, <i>"Which subscriptions went up?"</i>, <i>"Am I on track for my goals?"</i></p>`}${chat.busy ? '<p class="muted" id="thinking">Thinking… (looking up your data)</p>' : ''}</div>
+        ${chat.prompts?.length && !chat.messages.length ? `<div class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:10px">${chat.prompts.map((p) => `<button type="button" class="btn sm" data-prompt="${esc(p.name)}" title="${esc(p.description)}">${esc(p.title)}</button>`).join('')}</div>` : ''}
+        <form id="ask" class="row" style="align-items:flex-end"><textarea name="q" rows="2" placeholder="Ask about your money…" style="flex:1;resize:vertical" ${chat.busy ? 'disabled' : ''}></textarea><button class="btn primary" ${chat.busy ? 'disabled' : ''}>Send</button>${chat.messages.length ? '<button type="button" class="btn" id="clear">New chat</button>' : ''}</form>
+        <p class="muted" style="font-size:11px;margin:8px 0 0">Your question and the figures the model looks up are sent to OpenRouter and the model's provider. Account and card numbers are masked. The conversation is not saved.</p>`);
+    el.innerHTML = chatHtml + (ST.ai ? `<details style="margin-top:8px"><summary class="muted" style="cursor:pointer;margin-bottom:12px">Use Claude Desktop or Claude Code instead</summary>${claude}</details>` : claude);
+    const log = $('#log', el); if (log) log.scrollTop = log.scrollHeight;
+    const send = async (content, label) => {
+      if (chat.busy || !content.trim()) return;
+      chat.messages.push({ role: 'user', content, label }); chat.busy = true; go();
+      try { const r = await api('/api/ai/chat', 'POST', { messages: chat.messages.filter((m) => !m.error).map(({ role, content }) => ({ role, content })) }); chat.messages.push({ role: 'assistant', content: r.reply, steps: r.steps }); }
+      catch (e) { chat.messages.push({ role: 'assistant', content: e.message, error: true }); }
+      chat.busy = false; if ((location.hash.replace(/^#\//, '') || '').startsWith('chat')) go();
+    };
+    if ($('#ask', el)) {
+      const f = $('#ask', el), q = f.elements.q;
+      f.onsubmit = (e) => { e.preventDefault(); send(q.value); };
+      q.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(q.value); } };
+      if (!chat.busy) q.focus();
+    }
+    $$('[data-prompt]', el).forEach((b) => (b.onclick = () => { const p = chat.prompts.find((x) => x.name === b.dataset.prompt); send(p.text, p.title); }));
+    if ($('#clear', el)) $('#clear', el).onclick = () => { chat.messages = []; go(); };
   },
 };
 
@@ -815,6 +879,10 @@ pages.connections = {
           ${c.redirectFromEnv ? '<p class="muted">Set by the REDIRECT_URL environment variable.</p>' : `<form id="ruForm" class="row"><input type="text" name="url" value="${esc(c.redirectUrl)}" style="min-width:320px"><button class="btn sm">Save</button>${c.redirectUrl !== c.relayUrl ? '<button type="button" class="btn sm" id="ruReset">Use the default</button>' : ''}</form>`}</details>`)}
       ${card('Prices &amp; exchange rates · Alpha Vantage', status(c.alphavantage), `<p class="muted" style="margin:0 0 10px;font-size:13px">Optional. Used for stock prices and currency conversion. Get a free key at <b>alphavantage.co</b> (25 requests per day).</p>
         <form id="avForm" class="row"><input type="password" name="apiKey" placeholder="API key" autocomplete="off" required style="width:280px"><button class="btn primary">${c.alphavantage.configured ? 'Replace' : 'Save'}</button>${c.alphavantage.configured && c.alphavantage.source !== 'environment' ? '<button type="button" class="btn danger" id="avClear">Remove</button>' : ''}</form>`)}
+      ${card('AI · OpenRouter', status(c.openrouter) + (c.openrouter.model ? ` · model <code>${esc(c.openrouter.model)}</code>` : ''), `<p class="muted" style="margin:0 0 10px;font-size:13px">Optional. Lets you chat with your data under <a href="#/chat">Chat with AI</a>, and lets AI read unusual import files and suggest categories. Create a key at <b>openrouter.ai/keys</b> and pick a model id from <b>openrouter.ai/models</b> (for example <code>anthropic/claude-haiku-4.5</code>). You pay OpenRouter per use.</p>
+        <p class="muted" style="margin:0 0 10px;font-size:12px"><b>What is sent:</b> your question and the figures the model asks Pennystead for (transactions, totals, categories; account and card numbers are masked), or the first rows of a file you are importing. It goes to OpenRouter and the model's provider under their privacy terms. Nothing is sent until you use an AI feature.</p>
+        <form id="orForm" class="form"><label>API key<input type="password" name="apiKey" placeholder="${c.openrouter.configured ? 'saved (leave empty to keep it)' : 'sk-or-…'}" autocomplete="off" ${c.openrouter.configured ? '' : 'required'}></label><label>Model<input type="text" name="model" value="${esc(c.openrouter.model || '')}" placeholder="anthropic/claude-haiku-4.5" required autocomplete="off" spellcheck="false"></label>
+          <div class="row"><button class="btn primary">${c.openrouter.configured ? 'Save' : 'Save'}</button>${c.openrouter.configured ? '<button type="button" class="btn" id="orTest">Test</button>' : ''}${c.openrouter.configured && c.openrouter.source !== 'environment' ? '<button type="button" class="btn danger" id="orClear">Remove</button>' : ''}</div></form>`)}
       ${card('Google Drive backups', status(c.google) + (c.google.clientId ? ` · <code>${esc(c.google.clientId.slice(0, 18))}…</code>` : ''), `<p class="muted" style="margin:0 0 10px;font-size:13px">Optional. Create an OAuth client of type <b>Desktop app</b> in Google Cloud (steps are on the <a href="#/backups">Backups</a> page) and use this redirect URI if asked:</p>${copy('gu', c.googleRedirectUrl)}
         <form id="gForm" class="form" style="margin-top:10px"><label>Client ID<input type="text" name="clientId" value="${esc(c.google.clientId || '')}" required autocomplete="off"></label><label>Client secret<input type="password" name="clientSecret" required autocomplete="off"></label>
           <div class="row"><button class="btn primary">${c.google.configured ? 'Replace' : 'Save'}</button>${c.google.configured && c.google.source !== 'environment' ? '<button type="button" class="btn danger" id="gClear">Remove</button>' : ''}</div></form>`)}`;
@@ -827,8 +895,10 @@ pages.connections = {
     if ($('#ruForm', el)) $('#ruForm', el).onsubmit = async (e) => { e.preventDefault(); await run(() => api('/api/connect/redirect', 'POST', { url: e.target.url.value.trim() }), 'Redirect address saved'); go(); };
     if ($('#ruReset', el)) $('#ruReset', el).onclick = async () => { await run(() => api('/api/connect/redirect', 'POST', { url: '' }), 'Back to the default'); go(); };
     $('#avForm', el).onsubmit = (e) => { e.preventDefault(); save('/api/settings/alphavantage', { apiKey: e.target.apiKey.value }, 'Saved'); };
+    $('#orForm', el).onsubmit = (e) => { e.preventDefault(); save('/api/settings/openrouter', { apiKey: e.target.apiKey.value, model: e.target.model.value }, 'Saved. Use Test to check it works.'); };
+    if ($('#orTest', el)) $('#orTest', el).onclick = async (e) => { e.target.disabled = true; e.target.textContent = 'Testing…'; try { const r = await api('/api/ai/test', 'POST'); toast(`Works: ${r.model} answered "${r.reply}"`); } catch (er) { toast(er.message); } e.target.disabled = false; e.target.textContent = 'Test'; };
     $('#gForm', el).onsubmit = (e) => { e.preventDefault(); save('/api/settings/google', { clientId: e.target.clientId.value, clientSecret: e.target.clientSecret.value }, 'Saved'); };
-    for (const [id, name] of [['ebClear', 'enablebanking'], ['avClear', 'alphavantage'], ['gClear', 'google']]) if ($('#' + id, el)) $('#' + id, el).onclick = async () => { if (confirm('Remove these saved credentials?')) { await run(() => api('/api/settings/' + name, 'DELETE'), 'Removed'); go(); } };
+    for (const [id, name] of [['ebClear', 'enablebanking'], ['avClear', 'alphavantage'], ['gClear', 'google'], ['orClear', 'openrouter']]) if ($('#' + id, el)) $('#' + id, el).onclick = async () => { if (confirm('Remove these saved credentials?')) { await run(() => api('/api/settings/' + name, 'DELETE'), 'Removed'); go(); } };
     if ($('#ebTest', el)) $('#ebTest', el).onclick = async () => { const r = await run(() => api('/api/settings/test-bank', 'POST')); toast(`Connected to Enable Banking (${r.banks} banks found in Finland)`); };
   },
 };

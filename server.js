@@ -24,6 +24,7 @@ const assets = require('./lib/assets');
 const autostart = require('./lib/autostart');
 const VERSION = require('./lib/version');
 const updater = require('./lib/updater');
+const llm = require('./lib/llm');
 
 const CONSENT_DAYS = +process.env.CONSENT_DAYS || 90;
 const hasSession = () => fs.existsSync(paths.session);
@@ -115,7 +116,7 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
       // ----- app state & data -----
       if (P === '/api/state') {
         const all = store.txs(), accounts = Object.values(store.accounts()).map((a) => ({ name: a.name, label: a.label, currency: a.currency, lastSync: a.lastSync || null, imported: !!a.imported, iban: a.iban ? a.iban.slice(-4) : null, history: coverage('assets:bank:' + a.name, all) }));
-        return json(res, 200, { ...(await core.state()), goalCheck: goalChecks.unseen(), update: updater.summary(), connectPending: !!pendingState, version: VERSION, packaged: PACKAGED, dataDir: DATA_DIR, authRequired: auth.required(), hasData: !demo.isEmpty(), canConnect: configured(), canPrices: !!settings.alphaVantage(), demo: demo.isDemo(), accounts, redirectUrl: redirectUrl(), port });
+        return json(res, 200, { ...(await core.state()), goalCheck: goalChecks.unseen(), update: updater.summary(), connectPending: !!pendingState, version: VERSION, packaged: PACKAGED, dataDir: DATA_DIR, authRequired: auth.required(), hasData: !demo.isEmpty(), canConnect: configured(), canPrices: !!settings.alphaVantage(), ai: settings.openRouter() ? { model: settings.openRouter().model } : null, demo: demo.isDemo(), accounts, redirectUrl: redirectUrl(), port });
       }
       if (P === '/api/overview') return json(res, 200, await core.overview());
       if (P === '/api/history') return json(res, 200, await core.wealthHistory(q.range));
@@ -136,8 +137,8 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
 
       // ----- connections (credentials entered in the UI) -----
       if (P === '/api/settings' && METHOD === 'GET') return json(res, 200, { ...settings.status(), redirectUrl: redirectUrl(), relayUrl: RELAY, redirectFromEnv: !!process.env.REDIRECT_URL, connectPending: !!pendingState, googleRedirectUrl: GOOGLE_REDIRECT });
-      const sm = P.match(/^\/api\/settings\/(enablebanking|alphavantage|google)$/);
-      if (sm && METHOD === 'PUT') { const b = await readBody(req); ({ enablebanking: settings.setEnableBanking, alphavantage: () => settings.setAlphaVantage(b.apiKey), google: settings.setGoogle })[sm[1]](b); return json(res, 200, settings.status()); }
+      const sm = P.match(/^\/api\/settings\/(enablebanking|alphavantage|google|openrouter)$/);
+      if (sm && METHOD === 'PUT') { const b = await readBody(req); ({ enablebanking: settings.setEnableBanking, alphavantage: () => settings.setAlphaVantage(b.apiKey), google: settings.setGoogle, openrouter: settings.setOpenRouter })[sm[1]](b); return json(res, 200, settings.status()); }
       if (sm && METHOD === 'DELETE') { settings.clear(sm[1]); return json(res, 200, settings.status()); }
       if (P === '/api/settings/test-bank' && METHOD === 'POST') {
         const r = await eb('GET', '/aspsps?country=FI&psu_type=personal').catch((e) => { throw HttpError(400, `Enable Banking rejected these credentials: ${e.message}`); });
@@ -228,6 +229,12 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
       if (P === '/api/import/reparse' && METHOD === 'POST') { const b = await readBody(req); return json(res, 200, importer.reparse(b.importId, b)); }
       if (P === '/api/import/preview' && METHOD === 'POST') { const b = await readBody(req); return json(res, 200, importer.preview(b.importId, b.mapping, b.account, b.options || {})); }
       if (P === '/api/import/commit' && METHOD === 'POST') { notInDemo(); const b = await readBody(req); return json(res, 200, importer.commit(b.importId, b.mapping, b.account, b.options || {})); }
+      if (P === '/api/import/ai-map' && METHOD === 'POST') { const b = await readBody(req); return json(res, 200, await importer.aiMapping(b.importId).catch((e) => { throw HttpError(400, e.message); })); }
+      if (P === '/api/import/ai-categories' && METHOD === 'POST') { const b = await readBody(req); return json(res, 200, await importer.aiCategories(b.importId, b.mapping, b.account, b.options || {}).catch((e) => { throw HttpError(400, e.message); })); }
+      // ----- AI (OpenRouter) -----
+      if (P === '/api/ai/test' && METHOD === 'POST') return json(res, 200, await llm.test().catch((e) => { throw HttpError(400, e.message); }));
+      if (P === '/api/ai/chat' && METHOD === 'POST') { const b = await readBody(req); return json(res, 200, await llm.chat(b.messages).catch((e) => { throw HttpError(400, e.message); })); }
+      if (P === '/api/ai/prompts' && METHOD === 'GET') return json(res, 200, require('./lib/prompts').list().map((x) => ({ ...x, text: require('./lib/prompts').get(x.name).messages[0].content.text })));
       if (P === '/api/import/history' && METHOD === 'GET') return json(res, 200, importer.history());
       if (P === '/api/import/undo' && METHOD === 'POST') return json(res, 200, importer.undo((await readBody(req)).id));
 
