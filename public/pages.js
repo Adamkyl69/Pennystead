@@ -61,10 +61,12 @@ function welcome(el) {
   $('#loadDemo', el).onclick = async () => { await run(() => api('/api/demo/load', 'POST'), 'Sample data loaded'); go(); };
 }
 
-function txTable(rows, editable, cats = []) {
-  return `<table><thead><tr><th>Date</th><th>Counterparty</th><th>Category</th>${editable ? '<th>Account</th>' : ''}<th class="n">Amount</th></tr></thead><tbody>${rows.map((x) => `<tr><td class="muted" style="white-space:nowrap">${esc(x.date)}</td><td>${esc(x.desc)}</td>
+function txTable(rows, editable, cats = [], sel = null) {
+  const box = sel ? (x) => `<td style="width:28px"><input type="checkbox" data-sel="${esc(x.id)}" ${sel.has(x.id) ? 'checked' : ''} aria-label="Select"></td>` : () => '';
+  const head = sel ? `<th style="width:28px"><input type="checkbox" id="selPage" ${rows.length && rows.every((x) => sel.has(x.id)) ? 'checked' : ''} aria-label="Select all shown"></th>` : '';
+  return `<table><thead><tr>${head}<th>Date</th><th>Counterparty</th><th>Category</th>${editable ? '<th>Account</th>' : ''}<th class="n">Amount</th></tr></thead><tbody>${rows.map((x) => `<tr${sel?.has(x.id) ? ' class="sel"' : ''}>${box(x)}<td class="muted" style="white-space:nowrap">${esc(x.date)}</td><td>${esc(x.desc)}</td>
     <td>${editable ? `<select data-tx="${esc(x.id)}">${catOptions(cats, x.category)}</select>` : `<span class="muted">${esc(catLabel(x.category))}</span>`}</td>${editable ? `<td class="muted">${esc(x.account.split(':').pop())}</td>` : ''}
-    <td class="n ${x.amount < 0 ? '' : 'good'}">${money2(x.amount, x.cur)}</td></tr>`).join('') || `<tr><td colspan="5" class="empty">Nothing here yet.</td></tr>`}</tbody></table>`;
+    <td class="n ${x.amount < 0 ? '' : 'good'}">${money2(x.amount, x.cur)}</td></tr>`).join('') || `<tr><td colspan="6" class="empty">Nothing here yet.</td></tr>`}</tbody></table>`;
 }
 
 // ---------- Spending ----------
@@ -255,6 +257,8 @@ pages.liabilities = {
 
 // ---------- Transactions ----------
 const tx = { q: '', account: '', category: '', from: '', to: '', limit: 100 };
+const txSel = new Set(); // selected transaction ids, kept while you search and page
+let txUndo = null;       // the last delete, for Undo
 pages.transactions = {
   title: 'Transactions',
   async render(el) {
@@ -263,21 +267,57 @@ pages.transactions = {
       <select id="acc"><option value="">All accounts</option>${first.accounts.map((a) => `<option value="${esc(a)}" ${a === tx.account ? 'selected' : ''}>${esc(a.split(':').pop())}</option>`).join('')}</select>
       <select id="cat"><option value="">All categories</option>${catOptions(first.categories, tx.category)}</select>
       <input type="date" id="from" value="${tx.from}" title="From"><input type="date" id="to" value="${tx.to}" title="To"><a class="btn right" href="#/import">Import…</a></div>
-      <div class="tbl" id="txBody"></div><div id="more" style="text-align:center;margin-bottom:24px"></div>`;
+      <div id="undoBar"></div><div id="bulk"></div>
+      <div class="tbl" id="txBody"></div><div id="more" style="text-align:center;margin-bottom:24px"></div><div id="trash"></div>`;
     const cats = first.categories;
-    let seq = 0;
+    let seq = 0, total = 0, rows = [];
+    const bulkBar = () => {
+      const n = txSel.size;
+      $('#bulk', el).innerHTML = n ? `<div class="banner" style="position:sticky;top:0;z-index:2"><span><b>${n} selected</b>${total > n ? ` · <a id="selAll">Select all ${total} matching</a>` : ''} · <a id="selNone">Clear</a></span>
+        <span class="row"><select id="bulkCat"><option value="">Set category…</option>${catOptions(cats, '')}<option value="__rules">Back to my rules</option></select><button class="btn sm danger" id="bulkDel">Delete ${n}</button></span></div>` : '';
+      if (!n) return;
+      if ($('#selAll', el)) $('#selAll', el).onclick = async () => { const r = await api('/api/transactions?' + new URLSearchParams({ ...tx, idsOnly: 1 })); r.ids.forEach((id) => txSel.add(id)); draw(); };
+      $('#selNone', el).onclick = () => { txSel.clear(); draw(); };
+      $('#bulkCat', el).onchange = async (e) => {
+        const v = e.target.value; if (!v) return;
+        const r = await run(() => api('/api/transactions/category', 'POST', { ids: [...txSel], category: v === '__rules' ? '' : v }));
+        toast(v === '__rules' ? `${r.updated} transactions follow your rules again` : `${r.updated} transactions set to ${catLabel(v)}`); txSel.clear(); load(); loadState().then(() => renderSide('transactions'));
+      };
+      $('#bulkDel', el).onclick = async () => {
+        if (!confirm(`Delete ${n} transaction${n === 1 ? '' : 's'}?\n\nThey disappear from your history, spending and reports. Bank sync will not add them again. Account balances stay as your bank or statement reports them.\n\nYou can undo this, or restore them later under "Recently deleted".`)) return;
+        const r = await run(() => api('/api/transactions/delete', 'POST', { ids: [...txSel] }));
+        txSel.clear(); txUndo = r; undoBar(); load(); trash(); loadState().then(() => renderSide('transactions'));
+      };
+    };
+    const undoBar = () => {
+      $('#undoBar', el).innerHTML = txUndo ? `<div class="banner"><span>Deleted ${txUndo.deleted} transaction${txUndo.deleted === 1 ? '' : 's'}.</span><span class="row"><button class="btn sm" id="undo">Undo</button><button class="btn sm" id="undoX" aria-label="Dismiss">×</button></span></div>` : '';
+      if (!txUndo) return;
+      $('#undo', el).onclick = async () => { const r = await run(() => api('/api/transactions/restore', 'POST', { batch: txUndo.batch })); toast(`Restored ${r.restored}`); txUndo = null; undoBar(); load(); trash(); loadState().then(() => renderSide('transactions')); };
+      $('#undoX', el).onclick = () => { txUndo = null; undoBar(); };
+    };
+    const trash = async () => {
+      const b = await api('/api/transactions/deleted');
+      $('#trash', el).innerHTML = b.length ? `<details style="margin-bottom:24px"><summary class="muted" style="cursor:pointer">Recently deleted (${b.reduce((s, x) => s + x.count, 0)})</summary><div class="tbl" style="margin-top:8px"><table><tbody>${b.map((x) => `<tr><td class="muted" style="white-space:nowrap">${esc(new Date(x.at).toLocaleString())}</td><td>${x.count} transaction${x.count === 1 ? '' : 's'}<div class="muted" style="font-size:12px">${x.sample.map(esc).join(', ')}${x.count > x.sample.length ? '…' : ''}</div></td><td class="n">${money2(x.total)}</td><td class="n"><button class="btn sm" data-restore="${esc(x.batch)}">Restore</button></td></tr>`).join('')}</tbody></table></div></details>` : '';
+      $$('[data-restore]', el).forEach((btn) => (btn.onclick = async () => { const r = await run(() => api('/api/transactions/restore', 'POST', { batch: btn.dataset.restore })); toast(`Restored ${r.restored}`); if (txUndo?.batch === btn.dataset.restore) { txUndo = null; undoBar(); } load(); trash(); loadState().then(() => renderSide('transactions')); }));
+    };
+    const draw = () => {
+      $('#txBody', el).innerHTML = txTable(rows, true, cats, txSel);
+      bulkBar();
+      $$('[data-tx]', el).forEach((s) => (s.onchange = async () => { await run(() => api('/api/override', 'POST', { id: s.dataset.tx, category: s.value }), 'Category updated'); loadState().then(() => renderSide('transactions')); }));
+      $$('[data-sel]', el).forEach((c) => (c.onchange = () => { if (c.checked) txSel.add(c.dataset.sel); else txSel.delete(c.dataset.sel); c.closest('tr').classList.toggle('sel', c.checked); const all = $('#selPage', el); if (all) all.checked = rows.every((x) => txSel.has(x.id)); bulkBar(); }));
+      if ($('#selPage', el)) $('#selPage', el).onchange = (e) => { rows.forEach((x) => (e.target.checked ? txSel.add(x.id) : txSel.delete(x.id))); draw(); };
+    };
     const load = async () => {
       const mine = ++seq, r = await api('/api/transactions?' + new URLSearchParams(tx));
       if (mine !== seq) return; // a newer search was typed while this one loaded
-      $('#txBody', el).innerHTML = txTable(r.rows, true, cats);
+      rows = r.rows; total = r.total; draw();
       $('#more', el).innerHTML = r.total > r.rows.length ? `<button class="btn" id="moreBtn">Show more (${r.total - r.rows.length} left)</button>` : `<span class="muted">${r.total} transactions</span>`;
       if ($('#moreBtn', el)) $('#moreBtn', el).onclick = () => { tx.limit += 100; load(); };
-      $$('[data-tx]', el).forEach((s) => (s.onchange = async () => { await run(() => api('/api/override', 'POST', { id: s.dataset.tx, category: s.value }), 'Category updated'); loadState().then(() => renderSide('transactions')); }));
     };
     let t; const reload = () => { tx.limit = 100; load(); };
     $('#q', el).oninput = (e) => { tx.q = e.target.value; clearTimeout(t); t = setTimeout(reload, 250); };
     for (const [id, k] of [['acc', 'account'], ['cat', 'category'], ['from', 'from'], ['to', 'to']]) $('#' + id, el).onchange = (e) => { tx[k] = e.target.value; reload(); };
-    load();
+    undoBar(); load(); trash();
   },
 };
 
