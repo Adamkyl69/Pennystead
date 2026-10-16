@@ -54,11 +54,23 @@ function openBrowser(url) {
   const port = +process.env.PENNYSTEAD_PORT || +process.env.PORT || 3456;
   // After an in-app update the old version may still be shutting down: wait for the port instead of giving up.
   const updated = flag('--updated');
+  let waitForPort = updated;
   const listen = async () => {
     for (let i = 0; ; i++) {
-      try { return await start({ port }); } catch (e) { if (!updated || e.code !== 'EADDRINUSE' || i >= 40) throw e; await new Promise((r) => setTimeout(r, 500)); }
+      try { return await start({ port }); } catch (e) { if (!waitForPort || e.code !== 'EADDRINUSE' || i >= 40) throw e; await new Promise((r) => setTimeout(r, 500)); }
     }
   };
+  // An older Pennystead still running (say a copy started from a download before installing) must not keep
+  // answering instead of this newer one: ask it to quit, then take over its port.
+  async function replaceOlder() {
+    const r = await fetch(`http://127.0.0.1:${port}/api/ping`, { signal: AbortSignal.timeout(2000) }).then((x) => x.json()).catch(() => null);
+    if (r?.app !== 'pennystead' || !r.version || require('./lib/updater').compare(VERSION, r.version) <= 0) return { running: r };
+    const q = await fetch(`http://127.0.0.1:${port}/api/quit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(3000) }).catch(() => null);
+    if (!q?.ok) return { running: r, stuck: true };
+    console.log(`Pennystead ${r.version} was still running; replaced it with ${VERSION}.`);
+    waitForPort = true;
+    return { replaced: true };
+  }
   try {
     const s = await listen();
     console.log(`\n  Pennystead ${VERSION} is running\n\n    Open:  ${s.url}\n    Data:  ${DATA_DIR}\n\n  Keep this window open while you use Pennystead.\n  Close it (or press Ctrl+C) to quit.\n`);
@@ -67,8 +79,14 @@ function openBrowser(url) {
     process.on('SIGINT', quit); process.on('SIGTERM', quit);
   } catch (e) {
     if (e.code === 'EADDRINUSE') {
+      const old = await replaceOlder();
+      if (old.replaced) {
+        try { const s = await listen(); console.log(`\n  Pennystead ${VERSION} is running at ${s.url}\n`); openBrowser(s.url); const quit = () => s.stop().then(() => process.exit(0)); process.on('SIGINT', quit); process.on('SIGTERM', quit); return; }
+        catch (e2) { console.error(`Pennystead could not start: ${e2.message}`); process.exit(1); }
+      }
+      if (old.stuck) console.error(`An older Pennystead (${old.running.version}) is still running. Quit it (Settings → Security → Quit Pennystead, or end pennystead.exe in Task Manager), then start Pennystead again.`);
       // Is it Pennystead itself? Then just bring it up instead of failing.
-      const r = await fetch(`http://127.0.0.1:${port}/api/ping`, { signal: AbortSignal.timeout(2000) }).then((x) => x.json()).catch(() => null);
+      const r = old.running;
       if (r?.app === 'pennystead') { console.log(`Pennystead is already running at http://localhost:${port}. Opening it.`); openBrowser(`http://localhost:${port}`); process.exit(0); }
       console.error(`Port ${port} is used by another program. Close it, or start Pennystead with --port <another number>.`);
     } else console.error(`Pennystead could not start: ${e.message}`);
