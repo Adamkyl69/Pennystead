@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-eeXLukzVZ1ZswxhcIFo6nbbFScxlsWrnJwLgxVFn0mU='; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Pennystead · returning from your bank</title>
+<style>body{font:15px/1.5 system-ui,sans-serif;max-width:560px;margin:60px auto;padding:0 16px;color:#222}code{word-break:break-all;background:#f2f2ef;padding:2px 4px;border-radius:4px}a{color:#1f69c4}</style>
+</head>
+<body>
+<h1 style="font-size:20px">Returning to Pennystead…</h1>
+<p id="msg">Taking you back to Pennystead on this computer.</p>
+<script>
+// Relay for bank connections. Enable Banking only redirects to https addresses, and Pennystead runs on your own computer
+// (http://localhost). This page, served by GitHub Pages, sends the browser straight on to Pennystead on this computer.
+// It runs nothing else, loads nothing, and stores nothing. The one-time code in the address is useless without the
+// private key, which never leaves your computer.
+(function () {
+  var q = new URLSearchParams(location.search), state = q.get('state') || '', m = /^(\d{2,5})-/.exec(state);
+  var port = m && +m[1] >= 1 && +m[1] <= 65535 ? +m[1] : 3456;
+  var target = 'http://localhost:' + port + '/callback' + location.search;
+  var msg = document.getElementById('msg');
+  msg.innerHTML = 'Taking you back to Pennystead on this computer. If nothing happens, make sure Pennystead is running and <a id="go">click here</a>.<br><br>Still stuck? In Pennystead, open <b>Settings → Banks</b> and paste this address:<br><code id="addr"></code>';
+  document.getElementById('go').href = target;
+  document.getElementById('addr').textContent = location.href;
+  location.replace(target);
+})();
+</script>
+</body>
+</html>

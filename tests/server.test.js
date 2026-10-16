@@ -57,7 +57,7 @@ test('CSRF: JSON bodies must be application/json (blocks "simple" cross-site for
 });
 test('the OAuth return trip (a cross-site top-level navigation) is not blocked', async () => {
   const r = await raw(port, { url: '/callback?code=x&state=y', headers: { 'sec-fetch-site': 'cross-site', 'sec-fetch-mode': 'navigate' } });
-  assert.equal(r.status, 400); assert.match(r.body, /Bad or missing code/);
+  assert.equal(r.status, 400); assert.match(r.body, /does not match the connection you started/); // refused for the right reason, not by the CSRF guard
 });
 test('request bodies are size-limited and invalid JSON is rejected cleanly', async () => {
   assert.equal((await raw(port, { method: 'PUT', url: '/api/budget', headers: { 'content-type': 'application/json' }, body: '{not json' })).status, 400);
@@ -203,4 +203,15 @@ test('goals API: create, read with projection, update, delete; bad input is a 40
   assert.equal((await putJson(port, `/api/goals/${g.id}`, { target: '6000' })).status, 200);
   assert.equal((await post(port, '/api/goals', { name: '', target: '1' })).status, 400);
   assert.equal((await raw(port, { method: 'DELETE', url: `/api/goals/${g.id}`, headers: { origin: `http://localhost:${port}` } })).status, 200);
+});
+
+test('bank redirect: https only (Enable Banking refuses http), and pasting an address without a started connection is refused clearly', async () => {
+  const s = JSON.parse((await raw(port, { url: '/api/settings' })).body);
+  assert.match(s.redirectUrl, /^https:\/\//); assert.equal(s.redirectUrl, s.relayUrl, 'the GitHub Pages relay is the default');
+  assert.equal((await post(port, '/api/connect/redirect', { url: 'http://example.com/cb' })).status, 400);
+  assert.equal(JSON.parse((await post(port, '/api/connect/redirect', { url: `https://localhost:${port}/callback` })).body).redirectUrl, `https://localhost:${port}/callback`);
+  assert.equal(JSON.parse((await post(port, '/api/connect/redirect', { url: '' })).body).redirectUrl, s.relayUrl);
+  const r = await post(port, '/api/connect/finish', { url: 'https://localhost/callback?code=abc&state=1-2' });
+  assert.equal(r.status, 400); assert.match(JSON.parse(r.body).error, /does not match the connection you started/);
+  assert.match(JSON.parse((await post(port, '/api/connect/finish', { url: 'https://x/cb?error=access_denied&error_description=User%20cancelled' })).body).error, /User cancelled/);
 });

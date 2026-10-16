@@ -65,3 +65,11 @@ test('the Windows installer script points at files the build produces and keeps 
   assert.match(iss, /PrivilegesRequired=lowest/); assert.match(iss, /Source: "\.\.\\\.\.\\dist\\pennystead\.exe"/); assert.match(iss, /taskkill/);
   assert.ok(!/UninstallDelete/.test(iss), 'must not delete %APPDATA%\\Pennystead');
 });
+
+test('the bank relay page only forwards to localhost, and its inline script matches its own CSP hash', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'docs', 'callback.html'), 'utf8');
+  const js = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const hash = require('node:crypto').createHash('sha256').update(js).digest('base64');
+  assert.ok(html.includes(`'sha256-${hash}'`), 'update the CSP hash after editing the script');
+  assert.match(js, /'http:\/\/localhost:' \+ port \+ '\/callback'/); assert.ok(!/fetch\(|XMLHttpRequest|localStorage|<img|src=/.test(js), 'it sends nothing anywhere else');
+});

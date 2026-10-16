@@ -44,7 +44,20 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
   const exposed = !security.loopback(host);
   if (exposed && !auth.required()) throw new Error(`Refusing to listen on ${host} without a password. Set PENNYSTEAD_PASSWORD (or set a password in Settings → Security first), or listen on localhost only.`);
   const hosts = security.allowedHosts(port);
-  const REDIRECT_URL = process.env.REDIRECT_URL || `http://localhost:${port}/callback`;
+  // Enable Banking only accepts https redirect addresses. By default the bank sends you to a tiny relay page on GitHub
+  // Pages (docs/callback.html), which forwards straight to Pennystead on this computer; the port travels in `state`.
+  // Settings → Connections can change it, and REDIRECT_URL overrides it.
+  const RELAY = 'https://adamkyl69.github.io/Pennystead/callback.html';
+  const redirectUrl = () => process.env.REDIRECT_URL || loadConfig().bankRedirect || RELAY;
+  const LOCAL_CALLBACK = `http://localhost:${port}/callback`;
+  /** Finish a bank connection from the code and state the bank returned (by redirect, or pasted by the user). */
+  async function finishConnect(q) {
+    if (q.error) throw HttpError(400, `Your bank did not complete the connection: ${q.error_description || q.error}. Start again from Settings → Banks.`);
+    if (!q.code || !pendingState || q.state !== pendingState) throw HttpError(400, 'This link does not match the connection you started (or it was already used). Start again from Settings → Banks.');
+    pendingState = null;
+    writeAtomic(paths.session, JSON.stringify(await eb('POST', '/sessions', { code: q.code }), null, 2), { mode: 0o600 });
+    await runSync().catch((e) => console.error('initial sync failed:', e.message));
+  }
   const GOOGLE_REDIRECT = `http://localhost:${port}/oauth/google/callback`;
 
   const send = (res, code, body, type = 'application/json', extra = {}) => {
@@ -101,7 +114,7 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
       // ----- app state & data -----
       if (P === '/api/state') {
         const accounts = Object.values(store.accounts()).map((a) => ({ name: a.name, label: a.label, currency: a.currency, lastSync: a.lastSync || null, imported: !!a.imported, iban: a.iban ? a.iban.slice(-4) : null }));
-        return json(res, 200, { ...(await core.state()), goalCheck: goalChecks.unseen(), version: VERSION, packaged: PACKAGED, dataDir: DATA_DIR, authRequired: auth.required(), hasData: !demo.isEmpty(), canConnect: configured(), canPrices: !!settings.alphaVantage(), demo: demo.isDemo(), accounts, redirectUrl: REDIRECT_URL, port });
+        return json(res, 200, { ...(await core.state()), goalCheck: goalChecks.unseen(), connectPending: !!pendingState, version: VERSION, packaged: PACKAGED, dataDir: DATA_DIR, authRequired: auth.required(), hasData: !demo.isEmpty(), canConnect: configured(), canPrices: !!settings.alphaVantage(), demo: demo.isDemo(), accounts, redirectUrl: redirectUrl(), port });
       }
       if (P === '/api/overview') return json(res, 200, await core.overview());
       if (P === '/api/history') return json(res, 200, await core.wealthHistory(q.range));
@@ -121,7 +134,7 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
       if (P === '/api/demo/clear' && METHOD === 'POST') { if (!demo.isDemo()) throw HttpError(409, 'Only sample data can be cleared from here.'); demo.clear(); return json(res, 200, {}); }
 
       // ----- connections (credentials entered in the UI) -----
-      if (P === '/api/settings' && METHOD === 'GET') return json(res, 200, { ...settings.status(), redirectUrl: REDIRECT_URL, googleRedirectUrl: GOOGLE_REDIRECT });
+      if (P === '/api/settings' && METHOD === 'GET') return json(res, 200, { ...settings.status(), redirectUrl: redirectUrl(), relayUrl: RELAY, redirectFromEnv: !!process.env.REDIRECT_URL, connectPending: !!pendingState, googleRedirectUrl: GOOGLE_REDIRECT });
       const sm = P.match(/^\/api\/settings\/(enablebanking|alphavantage|google)$/);
       if (sm && METHOD === 'PUT') { const b = await readBody(req); ({ enablebanking: settings.setEnableBanking, alphavantage: () => settings.setAlphaVantage(b.apiKey), google: settings.setGoogle })[sm[1]](b); return json(res, 200, settings.status()); }
       if (sm && METHOD === 'DELETE') { settings.clear(sm[1]); return json(res, 200, settings.status()); }
@@ -172,18 +185,29 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
       if (P === '/api/connect' && METHOD === 'POST') {
         notInDemo();
         const { name, country } = await readBody(req);
-        pendingState = crypto.randomUUID();
-        const r = await eb('POST', '/auth', { access: { valid_until: new Date(Date.now() + CONSENT_DAYS * 864e5).toISOString() }, aspsp: { name, country }, state: pendingState, redirect_url: REDIRECT_URL, psu_type: 'personal' });
+        pendingState = `${port}-${crypto.randomUUID()}`; // the relay page reads the port from here
+        const r = await eb('POST', '/auth', { access: { valid_until: new Date(Date.now() + CONSENT_DAYS * 864e5).toISOString() }, aspsp: { name, country }, state: pendingState, redirect_url: redirectUrl(), psu_type: 'personal' });
         return json(res, 200, { url: r.url });
       }
       if (P === '/callback') {
         notInDemo();
-        const code = q.code;
-        if (!code || q.state !== pendingState) return send(res, 400, 'Bad or missing code/state. Start again from the dashboard.', 'text/plain');
-        pendingState = null;
-        writeAtomic(paths.session, JSON.stringify(await eb('POST', '/sessions', { code }), null, 2), { mode: 0o600 });
-        await runSync().catch((e) => console.error('initial sync failed:', e.message));
-        res.writeHead(302, security.headers({ Location: '/' })); return res.end();
+        try { await finishConnect(q); } catch (e) { return send(res, e.status || 500, `${e.message}`, 'text/plain; charset=utf-8'); }
+        res.writeHead(302, security.headers({ Location: '/#/banks' })); return res.end();
+      }
+      // Fallback when the bank's page does not bring you back: paste the address it ended on.
+      if (P === '/api/connect/finish' && METHOD === 'POST') {
+        notInDemo();
+        const raw = String((await readBody(req)).url || '').trim();
+        let params;
+        try { params = new URLSearchParams(raw.includes('?') ? raw.slice(raw.indexOf('?') + 1).split('#')[0] : raw); } catch { throw HttpError(400, 'That does not look like the address from your bank.'); }
+        await finishConnect(Object.fromEntries(params));
+        return json(res, 200, { ok: true });
+      }
+      if (P === '/api/connect/redirect' && METHOD === 'POST') {
+        const { url } = await readBody(req), c = loadConfig();
+        if (url && !/^https:\/\/[^\s]+$/.test(url) && url !== LOCAL_CALLBACK) throw HttpError(400, 'The redirect address must start with https:// (Enable Banking does not accept http).');
+        c.bankRedirect = url || null; saveConfig(c);
+        return json(res, 200, { redirectUrl: redirectUrl() });
       }
       if (P === '/api/sync' && METHOD === 'POST') { notInDemo(); return json(res, 200, await runSync()); }
       if (P === '/api/prices' && METHOD === 'POST') return json(res, 200, await updatePrices());

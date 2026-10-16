@@ -456,6 +456,7 @@ pages.banks = {
           <div class="row" style="margin-top:12px"><button class="btn primary" id="syncNow">Sync now</button><button class="btn danger" id="off">Disconnect</button></div>`
         : ST.demo ? '<p class="empty">Demo mode: connecting is disabled.</p>' : ST.canConnect ? `<div class="row"><select id="country">${['FI', 'SE', 'NO', 'DK', 'DE', 'FR', 'GB', 'NL', 'ES', 'IT', 'PL', 'EE', 'LV', 'LT', 'TR'].map((c) => `<option>${c}</option>`).join('')}</select><select id="bank" style="min-width:240px"></select><button class="btn primary" id="go">Connect</button></div><p class="muted">You will approve read-only access at your bank, then return here.</p>`
         : '<p class="empty">To connect a bank, first add your Enable Banking credentials. <a href="#/connections">Set up in Connections →</a></p>')}
+      ${!ST.connected && ST.connectPending ? card('Finish connecting', 'Approved access at your bank but did not come back here? Copy the full address from your browser\'s address bar on the page you ended on, and paste it below.', '<form id="finForm" class="row"><input type="text" name="url" placeholder="https://…?code=…&amp;state=…" style="min-width:320px;flex:1" required><button class="btn primary">Finish</button></form>') : ''}
       ${card('Prices &amp; exchange rates', ST.canPrices ? 'Alpha Vantage key saved.' : 'Add a free Alpha Vantage key in <a href="#/connections">Connections</a> to fetch stock prices and exchange rates.', '<button class="btn" id="px">Update prices now</button>')}`;
     if ($('#syncNow', el)) $('#syncNow', el).onclick = async () => { const r = await run(() => api('/api/sync', 'POST')); toast(`Synced: ${r.reduce((s, x) => s + x.added, 0)} new`); go(); };
     if ($('#off', el)) $('#off', el).onclick = async () => { if (confirm('Disconnect? Your history stays; syncing stops until you reconnect.')) { await api('/api/disconnect', 'POST'); go(); } };
@@ -465,6 +466,7 @@ pages.banks = {
       $('#go', el).onclick = async () => { const r = await run(() => api('/api/connect', 'POST', { name: $('#bank', el).value, country: $('#country', el).value })); if (r.url) location.href = r.url; };
     }
     $('#px', el).onclick = async () => { const r = await run(() => api('/api/prices', 'POST')); toast(r.errors?.length ? r.errors[0] : `Updated ${r.updated.length} prices`); };
+    if ($('#finForm', el)) $('#finForm', el).onsubmit = async (e) => { e.preventDefault(); await run(() => api('/api/connect/finish', 'POST', { url: e.target.url.value }), 'Bank connected'); go(); };
   },
 };
 
@@ -754,7 +756,9 @@ pages.connections = {
         <form id="ebForm" class="form" style="margin-bottom:10px"><label>Application ID<input type="text" name="appId" value="${esc(c.enablebanking.appId || '')}" required autocomplete="off"></label>
           <label>Private key (.pem file)<input type="file" name="key" accept=".pem,.key,text/plain" ${c.enablebanking.configured ? '' : 'required'}></label>
           <div class="row"><button class="btn primary">${c.enablebanking.configured ? 'Replace' : 'Save'}</button>${c.enablebanking.configured && c.enablebanking.source !== 'environment' ? '<button type="button" class="btn danger" id="ebClear">Remove</button>' : ''}${c.enablebanking.configured ? '<button type="button" class="btn" id="ebTest">Test connection</button>' : ''}</div></form>
-        <p class="muted" style="font-size:12px;margin:0">If Enable Banking rejects the redirect URL, tell me which URL it accepts; Pennystead can use a different port (<code>--port</code>).</p>`)}
+        <details style="font-size:12px"><summary class="muted" style="cursor:pointer">Use a different redirect address</summary>
+          <p class="muted" style="margin:8px 0">Enable Banking only accepts <code>https</code> addresses. The default is a small page that sends you straight back to Pennystead on this computer. If you register a different address (for example <code>https://localhost:${esc(location.port || '3456')}/callback</code>), enter it here; when your bank cannot bring you back, paste the address you end up on under Settings → Banks.</p>
+          ${c.redirectFromEnv ? '<p class="muted">Set by the REDIRECT_URL environment variable.</p>' : `<form id="ruForm" class="row"><input type="text" name="url" value="${esc(c.redirectUrl)}" style="min-width:320px"><button class="btn sm">Save</button>${c.redirectUrl !== c.relayUrl ? '<button type="button" class="btn sm" id="ruReset">Use the default</button>' : ''}</form>`}</details>`)}
       ${card('Prices &amp; exchange rates · Alpha Vantage', status(c.alphavantage), `<p class="muted" style="margin:0 0 10px;font-size:13px">Optional. Used for stock prices and currency conversion. Get a free key at <b>alphavantage.co</b> (25 requests per day).</p>
         <form id="avForm" class="row"><input type="password" name="apiKey" placeholder="API key" autocomplete="off" required style="width:280px"><button class="btn primary">${c.alphavantage.configured ? 'Replace' : 'Save'}</button>${c.alphavantage.configured && c.alphavantage.source !== 'environment' ? '<button type="button" class="btn danger" id="avClear">Remove</button>' : ''}</form>`)}
       ${card('Google Drive backups', status(c.google) + (c.google.clientId ? ` · <code>${esc(c.google.clientId.slice(0, 18))}…</code>` : ''), `<p class="muted" style="margin:0 0 10px;font-size:13px">Optional. Create an OAuth client of type <b>Desktop app</b> in Google Cloud (steps are on the <a href="#/backups">Backups</a> page) and use this redirect URI if asked:</p>${copy('gu', c.googleRedirectUrl)}
@@ -766,6 +770,8 @@ pages.connections = {
       if (!file) return toast('Choose your .pem private key file');
       await save('/api/settings/enablebanking', { appId: f.appId.value, privateKey: await file.text() }, 'Saved');
     };
+    if ($('#ruForm', el)) $('#ruForm', el).onsubmit = async (e) => { e.preventDefault(); await run(() => api('/api/connect/redirect', 'POST', { url: e.target.url.value.trim() }), 'Redirect address saved'); go(); };
+    if ($('#ruReset', el)) $('#ruReset', el).onclick = async () => { await run(() => api('/api/connect/redirect', 'POST', { url: '' }), 'Back to the default'); go(); };
     $('#avForm', el).onsubmit = (e) => { e.preventDefault(); save('/api/settings/alphavantage', { apiKey: e.target.apiKey.value }, 'Saved'); };
     $('#gForm', el).onsubmit = (e) => { e.preventDefault(); save('/api/settings/google', { clientId: e.target.clientId.value, clientSecret: e.target.clientSecret.value }, 'Saved'); };
     for (const [id, name] of [['ebClear', 'enablebanking'], ['avClear', 'alphavantage'], ['gClear', 'google']]) if ($('#' + id, el)) $('#' + id, el).onclick = async () => { if (confirm('Remove these saved credentials?')) { await run(() => api('/api/settings/' + name, 'DELETE'), 'Removed'); go(); } };
