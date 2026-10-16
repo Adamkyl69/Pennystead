@@ -245,6 +245,29 @@ async function go() {
   $('#page').replaceChildren(host);
   setTimeout(() => { if (!host.childNodes.length) host.innerHTML = '<p class="empty" aria-live="polite">Loading…</p>'; }, 250);
   try { await page.render(host, { from }); } catch (e) { console.error(e); host.innerHTML = `<div class="card bad">${esc(e.message)}</div>`; }
+  if (seq === navSeq) currencyNotice(host);
+}
+
+/**
+ * Currencies, on every page: confirm the main currency when an account uses another one (typically right after the
+ * first bank sync), and say plainly when amounts are being counted without an exchange rate.
+ */
+function currencyNotice(host) {
+  const c = ST.currency;
+  if (!c || ST.demo) return;
+  const other = c.accounts.filter((x) => x !== c.base), unconv = Object.entries(c.unconverted || {});
+  let html = '';
+  if (!c.confirmed && other.length) {
+    const only = c.accounts.length === 1 ? c.accounts[0] : null;
+    html = `<div class="banner" id="curAsk"><span><b>Which currency should Pennystead show?</b> ${only ? `Your account is in <b>${esc(only)}</b>` : `Your accounts use <b>${c.accounts.map(esc).join(', ')}</b>`}, and amounts are shown in <b>${esc(c.base)}</b>.</span><span class="row">${other.map((x) => `<button class="btn sm primary" data-base="${esc(x)}">Show in ${esc(x)}</button>`).join('')}${c.accounts.includes(c.base) || !only ? `<button class="btn sm" data-keep="1">Keep ${esc(c.base)}</button>` : `<button class="btn sm" data-keep="1">Keep ${esc(c.base)} (needs exchange rates)</button>`}</span></div>`;
+  } else if (unconv.length) {
+    html = `<div class="banner"><span class="warn">${unconv.map(([cur, n]) => `${n} transaction${n === 1 ? '' : 's'} in <b>${esc(cur)}</b>`).join(', ')} ${unconv.length === 1 && unconv[0][1] === 1 ? 'is' : 'are'} counted as ${esc(c.base)} without conversion, because there is no exchange rate. ${ST.canPrices ? 'Update prices to fetch rates,' : 'Add an Alpha Vantage key in Connections and update prices,'} or change the main currency.</span><span class="row">${ST.canPrices ? '<button class="btn sm" id="curPx">Update prices</button>' : '<a class="btn sm" href="#/connections">Connections</a>'}<a class="btn sm" href="#/banks">Main currency</a></span></div>`;
+  }
+  if (!html) return;
+  host.insertAdjacentHTML('afterbegin', html);
+  host.querySelectorAll('[data-base]').forEach((b) => (b.onclick = async () => { await run(() => api('/api/settings/base', 'POST', { base: b.dataset.base }), `Showing everything in ${b.dataset.base}`); go(); }));
+  host.querySelectorAll('[data-keep]').forEach((b) => (b.onclick = async () => { await run(() => api('/api/settings/base', 'POST', { keep: true }), `Keeping ${c.base}`); go(); }));
+  const px = host.querySelector('#curPx'); if (px) px.onclick = async () => { const r = await run(() => api('/api/prices', 'POST')); toast(r.errors?.length ? r.errors[0] : 'Exchange rates updated'); go(); };
 }
 // Rows that navigate use data-goto (inline event handlers are blocked by the Content-Security-Policy).
 document.addEventListener('click', (e) => { const r = e.target.closest('[data-goto]'); if (r) location.hash = r.dataset.goto; });

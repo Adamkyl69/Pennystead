@@ -463,6 +463,8 @@ pages.banks = {
         : ST.demo ? '<p class="empty">Demo mode: connecting is disabled.</p>' : ST.canConnect ? `<div class="row"><select id="country">${['FI', 'SE', 'NO', 'DK', 'DE', 'FR', 'GB', 'NL', 'ES', 'IT', 'PL', 'EE', 'LV', 'LT', 'TR'].map((c) => `<option>${c}</option>`).join('')}</select><select id="bank" style="min-width:240px"></select><button class="btn primary" id="go">Connect</button></div><p class="muted">You will approve read-only access at your bank, then return here.</p>`
         : '<p class="empty">To connect a bank, first add your Enable Banking credentials. <a href="#/connections">Set up in Connections →</a></p>')}
       ${!ST.connected && ST.connectPending ? card('Finish connecting', 'Approved access at your bank but did not come back here? Copy the full address from your browser\'s address bar on the page you ended on, and paste it below.', '<form id="finForm" class="row"><input type="text" name="url" placeholder="https://…?code=…&amp;state=…" style="min-width:320px;flex:1" required><button class="btn primary">Finish</button></form>') : ''}
+      ${card('Main currency', `Everything is shown and totalled in <b>${esc(ST.base)}</b>. ${ST.currency?.accounts?.length ? `Your accounts use ${ST.currency.accounts.map(esc).join(', ')}.` : ''}`, `<form id="baseForm" class="row"><input type="text" name="base" value="${esc(ST.base)}" maxlength="3" required style="width:90px;text-transform:uppercase" aria-label="Currency code">${(ST.currency?.accounts || []).filter((x) => x !== ST.base).map((x) => `<button type="button" class="btn sm" data-setbase="${esc(x)}">Use ${esc(x)}</button>`).join('')}<button class="btn primary">Save</button></form>
+        <p class="muted" style="margin:10px 0 0;font-size:12px">Accounts in other currencies are converted with exchange rates (Alpha Vantage key needed). Budget amounts and goal targets keep their numbers when you change this, so adjust them if needed.</p>`)}
       ${card('Prices &amp; exchange rates', ST.canPrices ? 'Alpha Vantage key saved.' : 'Add a free Alpha Vantage key in <a href="#/connections">Connections</a> to fetch stock prices and exchange rates.', '<button class="btn" id="px">Update prices now</button>')}`;
     if ($('#syncNow', el)) $('#syncNow', el).onclick = async () => { const r = await run(() => api('/api/sync', 'POST')); toast(`Synced: ${r.reduce((s, x) => s + x.added, 0)} new`); go(); };
     if ($('#syncFull', el)) $('#syncFull', el).onclick = async () => {
@@ -477,6 +479,9 @@ pages.banks = {
       $('#country', el).onchange = load; load();
       $('#go', el).onclick = async () => { const r = await run(() => api('/api/connect', 'POST', { name: $('#bank', el).value, country: $('#country', el).value })); if (r.url) location.href = r.url; };
     }
+    const setBase = async (b) => { await run(() => api('/api/settings/base', 'POST', { base: b }), `Main currency: ${b.toUpperCase()}`); go(); };
+    $('#baseForm', el).onsubmit = (e) => { e.preventDefault(); setBase(e.target.base.value); };
+    $$('[data-setbase]', el).forEach((b) => (b.onclick = () => setBase(b.dataset.setbase)));
     $('#px', el).onclick = async () => { const r = await run(() => api('/api/prices', 'POST')); toast(r.errors?.length ? r.errors[0] : `Updated ${r.updated.length} prices`); };
     if ($('#finForm', el)) $('#finForm', el).onsubmit = async (e) => { e.preventDefault(); await run(() => api('/api/connect/finish', 'POST', { url: e.target.url.value }), 'Bank connected'); go(); };
   },

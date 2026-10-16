@@ -140,6 +140,7 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
       const sm = P.match(/^\/api\/settings\/(enablebanking|alphavantage|google|openrouter)$/);
       if (sm && METHOD === 'PUT') { const b = await readBody(req); ({ enablebanking: settings.setEnableBanking, alphavantage: () => settings.setAlphaVantage(b.apiKey), google: settings.setGoogle, openrouter: settings.setOpenRouter })[sm[1]](b); return json(res, 200, settings.status()); }
       if (sm && METHOD === 'DELETE') { settings.clear(sm[1]); return json(res, 200, settings.status()); }
+      if (P === '/api/settings/base' && METHOD === 'POST') { const b = await readBody(req); return json(res, 200, b.keep ? core.confirmBase() : core.setBase(b.base)); }
       if (P === '/api/settings/test-bank' && METHOD === 'POST') {
         const r = await eb('GET', '/aspsps?country=FI&psu_type=personal').catch((e) => { throw HttpError(400, `Enable Banking rejected these credentials: ${e.message}`); });
         return json(res, 200, { ok: true, banks: (r.aspsps || []).length });
