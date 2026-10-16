@@ -114,6 +114,8 @@ Upload a `.csv`, `.tsv`, `.txt` or `.xlsx` file (up to 30 MB), check the column 
 - Rows with a currency different from the account's are rejected rather than silently mixed; rows that cannot be read are listed in the preview with the reason.
 
 ## Backups
+
+**Excel copy:** *Backups → Download Excel copy* gives you a spreadsheet with every transaction, today's balances and spending per category per month. Tick *Also save an Excel copy* to write one beside every local backup. The `.bak` file stays the real backup (it holds rules, goals and settings and restores exactly, and is encrypted with your passphrase); the Excel copy is for reading and is not encrypted.
 Everything lives in `data/`, so backing up means copying it safely. *Settings → Backups* does that automatically.
 
 - **What is backed up:** your whole `data/` folder (transactions, imports and import mappings, rules, budgets, manual assets and their history, holdings, journals).

@@ -243,6 +243,11 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
       if (P === '/api/backup/run' && METHOD === 'POST') return json(res, 200, await backup.runBackup({ force: true }));
       if (P === '/api/backup/passphrase' && METHOD === 'POST') { backup.setPassphrase((await readBody(req)).passphrase ?? null); return json(res, 200, {}); }
       if (P === '/api/backup/drive' && METHOD === 'GET') return json(res, 200, await gdrive.list());
+      if (P === '/api/export.xlsx' && METHOD === 'GET') {
+        const buf = await require('./lib/export').workbook();
+        res.writeHead(200, security.headers({ 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': `attachment; filename="pennystead-${require('./lib/dates').today()}.xlsx"` }));
+        return res.end(buf);
+      }
       if (P === '/api/backup/download' && METHOD === 'GET') {
         if (!/^(pennystead|pre-restore)-[\w.-]+\.bak(\.enc)?$/.test(q.name || '')) throw HttpError(400, 'Invalid name');
         const f = path.join(backup.localDir(), q.name);

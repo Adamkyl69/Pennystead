@@ -14,7 +14,7 @@
   "engines": {
     "node": ">=20"
   },
-  "version": "1.1.0",
+  "version": "1.2.0",
   "bin": {
     "pennystead": "main.js"
   },
