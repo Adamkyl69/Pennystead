@@ -29,8 +29,9 @@ test.after(() => srv.close());
 test('settings: key and model are checked, the key is never shown, the model keeps OpenRouter suffixes', () => {
   assert.throws(() => settings.setOpenRouter({ apiKey: 'sk-or-v1-abcdef123456', model: 'claude haiku' }), /model/);
   assert.throws(() => settings.setOpenRouter({ apiKey: '', model: 'anthropic/claude-haiku-4.5' }), /API key/);
-  settings.setOpenRouter({ apiKey: 'sk-or-v1-abcdef123456', model: 'anthropic/claude-haiku-5.5:batch' });
-  assert.deepEqual(settings.status().openrouter, { configured: true, model: 'anthropic/claude-haiku-5.5:batch', source: 'saved' });
+  assert.throws(() => settings.setOpenRouter({ apiKey: 'sk-or-v1-abcdef123456', model: 'anthropic/claude-haiku-5.5:batch' }), /batch service.*anthropic\/claude-haiku-5\.5$/);
+  settings.setOpenRouter({ apiKey: 'sk-or-v1-abcdef123456', model: 'anthropic/claude-haiku-5.5:nitro' });
+  assert.deepEqual(settings.status().openrouter, { configured: true, model: 'anthropic/claude-haiku-5.5:nitro', source: 'saved' });
   assert.ok(!JSON.stringify(settings.status()).includes('abcdef123456'));
   settings.setOpenRouter({ apiKey: '', model: 'anthropic/claude-haiku-4.5' }); // empty key keeps the saved one
   assert.equal(settings.openRouter().apiKey, 'sk-or-v1-abcdef123456');
