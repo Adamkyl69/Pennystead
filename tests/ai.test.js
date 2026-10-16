@@ -113,7 +113,45 @@ test('every tool the AI can call actually runs', async () => {
   const tools = require('../lib/tools');
   for (const t of tools.list()) {
     if (t.name === 'hledger_query') continue;
-    const out = await tools.call(t.name, t.name === 'net_worth_history' ? { range: '3M' } : {});
+    const args = { net_worth_history: { range: '3M' }, compare_periods: { a_from: '2026-01-01', a_to: '2026-03-31', b_from: '2026-04-01', b_to: '2026-06-30' } }[t.name] || {};
+    const out = await tools.call(t.name, args);
     assert.ok(out != null, t.name);
   }
+});
+
+test('aggregate gives exact totals at any size; merchants finds names by meaning/spelling; search pages', async () => {
+  const tools = require('../lib/tools'), txs = await core.transactions();
+  const food = txs.filter((t) => t.category.startsWith('expenses:food')).reduce((s, t) => s - (t.value ?? t.amount), 0);
+  const byCat = await tools.call('aggregate', { group_by: 'category', depth: 2, limit: 200 });
+  assert.equal(byCat.groups.find((g) => g.key === 'expenses:food').total, Math.round(food * 100) / 100);
+  const months = await tools.call('aggregate', { group_by: 'month', category: 'expenses:food' });
+  assert.deepEqual(months.groups.map((g) => g.key), [...months.groups.map((g) => g.key)].sort(), 'months in order');
+  assert.equal(Math.round(months.total * 100), Math.round(food * 100));
+  assert.equal((await tools.call('merchants', { query: 'spotfy' })).merchants[0].name, 'SPOTIFY', 'a typo still finds it');
+  const all = await tools.call('search_transactions', { limit: 200 });
+  const p1 = await tools.call('search_transactions', { limit: 5 }), p2 = await tools.call('search_transactions', { limit: 5, offset: p1.next_offset });
+  assert.equal(p1.has_more, true); assert.deepEqual([...p1.transactions, ...p2.transactions], all.transactions.slice(0, 10));
+  const cmp = await tools.call('compare_periods', { a_from: '2026-07-01', a_to: '2026-07-31', b_from: '2026-08-01', b_to: '2026-08-31' });
+  const out = (from, to) => Math.round(txs.filter((t) => t.date >= from && t.date <= to && t.category.startsWith('expenses')).reduce((s, t) => s - (t.value ?? t.amount), 0) * 100) / 100;
+  assert.equal(cmp.a.money_out, out('2026-07-01', '2026-07-31')); assert.equal(cmp.b.money_out, out('2026-08-01', '2026-08-31'));
+  await assert.rejects(tools.call('compare_periods', { a_from: 'July' }), /a_from/);
+});
+
+test('a long conversation is summarized once, then carried forward, instead of being cut off', async () => {
+  const history = [];
+  for (let i = 0; i < 15; i++) history.push({ role: 'user', content: `question ${i}` }, { role: 'assistant', content: `answer ${i}: spent ${100 + i} EUR` });
+  history.push({ role: 'user', content: 'and now?' });
+  seen.length = 0;
+  reply = (body) => (/Summarize this part/.test(body.messages[0].content) ? { role: 'assistant', content: '- asked about spending; answers were 100-114 EUR' } : { role: 'assistant', content: 'final' });
+  const r = await llm.chat(history, {});
+  assert.equal(seen.length, 2, 'one summary call, one answer');
+  assert.match(seen[0].body.messages[1].content, /question 0/);
+  assert.match(seen[1].body.messages[0].content, /Earlier in this conversation[\s\S]*100-114 EUR/);
+  assert.equal(seen[1].body.messages.length, 1 + 12, 'system + the 12 most recent messages');
+  assert.equal(r.memory.upTo, history.length - 12);
+  // Next turn: the summary is reused, no new summary call.
+  seen.length = 0;
+  await llm.chat([...history, { role: 'assistant', content: 'final' }, { role: 'user', content: 'thanks' }], r.memory);
+  assert.equal(seen.length, 1);
+  assert.match(seen[0].body.messages[0].content, /100-114 EUR/);
 });

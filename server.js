@@ -233,7 +233,7 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
       if (P === '/api/import/ai-categories' && METHOD === 'POST') { const b = await readBody(req); return json(res, 200, await importer.aiCategories(b.importId, b.mapping, b.account, b.options || {}).catch((e) => { throw HttpError(400, e.message); })); }
       // ----- AI (OpenRouter) -----
       if (P === '/api/ai/test' && METHOD === 'POST') return json(res, 200, await llm.test().catch((e) => { throw HttpError(400, e.message); }));
-      if (P === '/api/ai/chat' && METHOD === 'POST') { const b = await readBody(req); return json(res, 200, await llm.chat(b.messages).catch((e) => { throw HttpError(400, e.message); })); }
+      if (P === '/api/ai/chat' && METHOD === 'POST') { const b = await readBody(req); return json(res, 200, await llm.chat(b.messages, b.memory || {}).catch((e) => { throw HttpError(400, e.message); })); }
       if (P === '/api/ai/prompts' && METHOD === 'GET') return json(res, 200, require('./lib/prompts').list().map((x) => ({ ...x, text: require('./lib/prompts').get(x.name).messages[0].content.text })));
       if (P === '/api/import/history' && METHOD === 'GET') return json(res, 200, importer.history());
       if (P === '/api/import/undo' && METHOD === 'POST') return json(res, 200, importer.undo((await readBody(req)).id));

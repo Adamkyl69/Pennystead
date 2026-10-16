@@ -816,8 +816,8 @@ function md(src) {
   }
   return out.join('');
 }
-const TOOL_LABEL = { net_worth: 'net worth', overview: 'overview', net_worth_history: 'net worth history', manual_assets: 'assets', monthly_summary: 'monthly totals', spending_by_category: 'spending by category', budget_status: 'budgets', search_transactions: 'transactions', subscriptions: 'subscriptions', goals: 'goals', goal_checks: 'goal history', review_queue: 'uncategorized merchants', anomalies: 'unusual charges', hledger_query: 'ledger report' };
-const chat = { messages: [], busy: false, prompts: null }; // kept while the app is open; never stored on disk
+const TOOL_LABEL = { net_worth: 'net worth', overview: 'overview', net_worth_history: 'net worth history', manual_assets: 'assets', monthly_summary: 'monthly totals', spending_by_category: 'spending by category', budget_status: 'budgets', search_transactions: 'transactions', subscriptions: 'subscriptions', goals: 'goals', goal_checks: 'goal history', review_queue: 'uncategorized merchants', anomalies: 'unusual charges', hledger_query: 'ledger report', aggregate: 'totals', compare_periods: 'period comparison', merchants: 'merchants' };
+const chat = { messages: [], busy: false, prompts: null, memory: {} }; // kept while the app is open; never stored on disk
 
 pages.chat = {
   title: 'Chat with AI',
@@ -843,7 +843,7 @@ pages.chat = {
     const send = async (content, label) => {
       if (chat.busy || !content.trim()) return;
       chat.messages.push({ role: 'user', content, label }); chat.busy = true; go();
-      try { const r = await api('/api/ai/chat', 'POST', { messages: chat.messages.filter((m) => !m.error).map(({ role, content }) => ({ role, content })) }); chat.messages.push({ role: 'assistant', content: r.reply, steps: r.steps }); }
+      try { const r = await api('/api/ai/chat', 'POST', { messages: chat.messages.filter((m) => !m.error).map(({ role, content }) => ({ role, content })), memory: chat.memory }); chat.messages.push({ role: 'assistant', content: r.reply, steps: r.steps }); chat.memory = r.memory || {}; }
       catch (e) { chat.messages.push({ role: 'assistant', content: e.message, error: true }); }
       chat.busy = false; if ((location.hash.replace(/^#\//, '') || '').startsWith('chat')) go();
     };
@@ -854,7 +854,7 @@ pages.chat = {
       if (!chat.busy) q.focus();
     }
     $$('[data-prompt]', el).forEach((b) => (b.onclick = () => { const p = chat.prompts.find((x) => x.name === b.dataset.prompt); send(p.text, p.title); }));
-    if ($('#clear', el)) $('#clear', el).onclick = () => { chat.messages = []; go(); };
+    if ($('#clear', el)) $('#clear', el).onclick = () => { chat.messages = []; chat.memory = {}; go(); };
   },
 };
 

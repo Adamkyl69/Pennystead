@@ -157,6 +157,7 @@ Goals page: a target, an optional date, and what it tracks: liquid net worth, ne
 Add an [OpenRouter](https://openrouter.ai) API key and a model id (for example `anthropic/claude-haiku-4.5`; any model on openrouter.ai/models with tool calling works) under *Settings → Connections → AI*, then press **Test**. You pay OpenRouter per use.
 
 - **Chat with AI:** ask about your money in plain language, or start a guided review (monthly review, find savings, goals, budgets, net worth). The model looks things up with the same read-only tools Claude Desktop uses, so answers come from your real data. It cannot change anything. The conversation is not saved.
+  The model never gets your whole history: Pennystead computes exact totals, rankings, month-by-month figures and period comparisons itself (also with hundreds of thousands of transactions) and hands the model only the result. Merchants are found by loose matching (typos, accents, word order), transaction lists are paged, and long conversations are summarized instead of cut off.
 - **Import → Let AI read this file:** for statements Pennystead cannot map by itself (title rows, account details on top, separate in/out columns, unusual headers in any language), the AI says where the table starts and which column is what. You check the columns and the preview before anything is imported.
 - **Import → Categorize with AI:** merchants your rules do not know get one of *your* categories (never a made-up one); you see them marked ✦ in the preview and can change them later.
 
