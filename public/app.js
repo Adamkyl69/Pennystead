@@ -25,6 +25,7 @@ function money(n, cur = BASE, o = {}) {
   catch { return `${(+n).toLocaleString(undefined, { maximumFractionDigits: Math.max(d, 2) })} ${cur}`; }
 }
 const money2 = (n, c) => money(n, c, { d: 2 });
+const shiftISO = (iso, days) => new Date(Date.parse(iso + 'T00:00:00Z') + days * 864e5).toISOString().slice(0, 10);
 const compact = (n) => new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: Math.abs(n) < 10 && n % 1 ? 2 : 1 }).format(n);
 const pct = (p) => (p == null ? '—' : `${p > 0 ? '+' : ''}${p}%`);
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

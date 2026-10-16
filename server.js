@@ -122,7 +122,8 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
       if (P === '/api/history') return json(res, 200, await core.wealthHistory(q.range));
       if (P === '/api/spending') return json(res, 200, await core.spending(q));
       if (P === '/api/transactions') return json(res, 200, await core.transactionsPage(q));
-      if (P === '/api/review') return json(res, 200, await core.review());
+      if (P === '/api/review') return json(res, 200, await core.review(q));
+      if (P === '/api/review/hide' && METHOD === 'POST') { const b = await readBody(req); return json(res, 200, core.setHidden(b.kind, b.id, b.hide !== false)); }
       if (P === '/api/assets') return json(res, 200, await core.wealth());
       if (P === '/api/categories') { if (METHOD === 'POST') { core.addCategory((await readBody(req)).account); return json(res, 200, {}); } return json(res, 200, await core.categories()); }
       if (P === '/api/rules') { if (METHOD === 'PUT') return json(res, 200, core.setRules((await readBody(req)).rules)); return json(res, 200, loadConfig().rules); }
