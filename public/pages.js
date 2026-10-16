@@ -482,6 +482,46 @@ pages.banks = {
   },
 };
 
+// ---------- Updates ----------
+pages.updates = {
+  title: 'Updates',
+  async render(el) {
+    el.innerHTML = '<p class="muted">Checking for updates…</p>';
+    const draw = (u) => {
+      const when = u.publishedAt ? new Date(u.publishedAt).toLocaleDateString() : '';
+      const mb = u.size ? ` (${Math.round(u.size / 1048576)} MB)` : '';
+      const head = u.available ? `Version ${esc(u.latest)} is available${when ? ` · released ${esc(when)}` : ''}` : u.error ? '' : u.latest ? 'You have the newest version.' : 'No published version yet.';
+      el.innerHTML = `
+        ${card(`Pennystead ${esc(u.current)}`, head,
+          `${u.error ? `<p class="warn" style="margin:0 0 10px">${esc(u.error)}</p>` : ''}
+           ${u.available && u.notes ? `<details open><summary class="muted">What's new</summary><pre style="white-space:pre-wrap;font:inherit;margin:8px 0 0">${esc(u.notes)}</pre></details>` : ''}
+           ${u.available ? (u.cannotInstall ? `<p class="warn">${esc(u.cannotInstall)}</p>` : `<p class="muted" style="font-size:13px">Pennystead downloads the new version${mb}, checks it against the checksum published with it, installs it and restarts. Your data is not touched. Takes about a minute.</p><button class="btn primary" id="install">Install ${esc(u.latest)} and restart</button>`) : ''}
+           <div class="row" style="margin-top:14px"><button class="btn" id="checkNow">Check now</button>
+             <label class="chk row"><input type="checkbox" id="auto" ${u.auto ? 'checked' : ''}> Check automatically (one anonymous request to GitHub at start and every 12 hours)</label>
+             ${u.page ? `<a class="right" href="${esc(u.page)}" target="_blank" rel="noopener">Releases page →</a>` : ''}</div>
+           <p class="muted" style="font-size:12px;margin:10px 0 0">Last checked ${esc(new Date(u.checkedAt).toLocaleString())}.</p>`)}`;
+      $('#checkNow', el).onclick = async () => draw(await run(() => api('/api/update?refresh=1')));
+      $('#auto', el).onchange = async (e) => { await run(() => api('/api/update/auto', 'POST', { on: e.target.checked }), e.target.checked ? 'Automatic checks on' : 'Automatic checks off'); };
+      if ($('#install', el)) $('#install', el).onclick = async (e) => {
+        if (!confirm(`Install Pennystead ${u.latest} now? Pennystead restarts when it is done.`)) return;
+        e.target.disabled = true; e.target.textContent = 'Downloading and installing…';
+        try { await api('/api/update/install', 'POST'); } catch (err) { toast(err.message); e.target.disabled = false; e.target.textContent = `Install ${u.latest} and restart`; return; }
+        el.innerHTML = card('Restarting…', `Installing Pennystead ${esc(u.latest)}. This page reloads by itself.`, '<p class="muted" id="wait">Waiting for the new version to start…</p>');
+        // Wait for the new version to answer, then reload into it.
+        const t0 = Date.now();
+        const poll = async () => {
+          const r = await fetch('/api/ping', { cache: 'no-store' }).then((x) => x.json()).catch(() => null);
+          if (r?.version && r.version !== u.current) return location.reload();
+          if (Date.now() - t0 > 180e3) { $('#wait').innerHTML = 'The new version has not started yet. Open Pennystead again from your Start menu, Applications folder or app launcher.'; return; }
+          setTimeout(poll, 1500);
+        };
+        setTimeout(poll, 2000);
+      };
+    };
+    try { draw(await api('/api/update')); } catch (e) { el.innerHTML = `<div class="card bad">${esc(e.message)}</div>`; }
+  },
+};
+
 // ---------- Backups ----------
 const INTERVALS = [['off', 'Off (manual only)'], ['daily', 'Daily'], ['weekly', 'Weekly'], ['on-change', 'Whenever data changes']];
 const when = (iso) => (iso ? `${new Date(iso).toLocaleString()} (${ago(iso)})` : 'never');

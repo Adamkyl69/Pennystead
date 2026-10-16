@@ -197,17 +197,18 @@ const ICONS = {
   liabilities: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>', transactions: '<path d="M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4"/>',
   goals: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/>', review: '<path d="M4 6l2 2 3-3M4 14l2 2 3-3M12 7h8M12 15h8"/>', categories: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1"/>',
   chat: '<path d="M21 12a8 8 0 0 1-11.5 7.2L4 20l1-4.4A8 8 0 1 1 21 12z"/>', rules: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10M6 12h10"/>', banks: '<path d="M3 10l9-6 9 6M5 10v8M10 10v8M14 10v8M19 10v8M3 20h18"/>', connections: '<path d="M9 7V3M15 7V3M7 7h10v5a5 5 0 0 1-10 0zM12 17v4"/>', security: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>', backups: '<path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/>', import: '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>', sync: '<path d="M21 12a9 9 0 0 1-15 6.7L3 16M3 12a9 9 0 0 1 15-6.7L21 8M3 21v-5h5M21 3v5h-5"/>',
+  updates: '<path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>',
 };
 const NAV = [['overview', 'Overview'], ['spending', 'Spending'], ['goals', 'Goals'], ['assets', 'Assets'], ['liabilities', 'Liabilities'], ['transactions', 'Transactions'], ['import', 'Import'], ['review', 'Review']];
-const SETTINGS = [['categories', 'Categories'], ['rules', 'Rules'], ['banks', 'Banks'], ['backups', 'Backups'], ['connections', 'Connections'], ['chat', 'Chat with AI'], ['security', 'Security']];
+const SETTINGS = [['categories', 'Categories'], ['rules', 'Rules'], ['banks', 'Banks'], ['backups', 'Backups'], ['connections', 'Connections'], ['chat', 'Chat with AI'], ['security', 'Security'], ['updates', 'Updates']];
 const ico = (k) => `<svg viewBox="0 0 24 24">${ICONS[k]}</svg>`;
 
 function renderSide(route) {
-  const item = ([k, l]) => `<a class="nav ${route === k ? 'on' : ''}" href="#/${k}">${ico(k)}${l}${k === 'review' && ST.reviewCount ? `<span class="badge">${ST.reviewCount}</span>` : ''}</a>`;
+  const item = ([k, l]) => `<a class="nav ${route === k ? 'on' : ''}" href="#/${k}">${ico(k)}${l}${k === 'review' && ST.reviewCount ? `<span class="badge">${ST.reviewCount}</span>` : ''}${k === 'updates' && ST.update?.available ? '<span class="badge">new</span>' : ''}</a>`;
   $('#side').innerHTML = `<div class="brand"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Pennystead</div>
     <button class="nav primary" id="syncBtn" ${ST.demo ? 'disabled' : ''}>${ico('sync')}${ST.demo ? 'Demo data' : ST.connected ? 'Sync banks' : 'Connect a bank'}</button>
     ${NAV.map(item).join('')}<div class="grp">Settings</div>${SETTINGS.map(item).join('')}
-    <div style="margin-top:auto"></div><div class="foot"><span class="dot ${ST.connected || ST.demo ? '' : 'off'}"></span>${ST.demo ? 'demo data' : ST.connected ? `${ST.accountCount} account${ST.accountCount === 1 ? '' : 's'} · synced ${esc(ST.lastSync || 'never')}` : 'not connected'}</div>
+    <div style="margin-top:auto"></div>${ST.update?.available ? `<a class="nav primary" href="#/updates" style="margin-bottom:6px">${ico('updates')}Update to ${esc(ST.update.latest)}</a>` : ''}<div class="foot"><span class="dot ${ST.connected || ST.demo ? '' : 'off'}"></span>${ST.demo ? 'demo data' : ST.connected ? `${ST.accountCount} account${ST.accountCount === 1 ? '' : 's'} · synced ${esc(ST.lastSync || 'never')}` : 'not connected'}</div>
     ${ST.authRequired ? '<button class="nav" id="logout" style="margin-top:4px">Sign out</button>' : ''}<a class="foot" href="#/backups" style="text-decoration:none;margin-top:0;padding-top:0">${ST.backup?.error ? '<span class="bad">⚠ backup failing</span>' : ST.backup?.enabled ? `<span class="muted">backup ${ST.backup.lastAt ? ago(ST.backup.lastAt) : 'pending'}</span>` : '<span class="muted">backups off</span>'}</a>`;
   if ($('#logout')) $('#logout').onclick = async () => { await fetch('/api/logout', { method: 'POST' }); location.href = '/login'; };
   $('#syncBtn').onclick = async () => {

@@ -22,6 +22,7 @@ Usage: pennystead [options]
   --browser-tab     Open in a normal browser tab instead of Pennystead's own window
   --host <addr>     Listen address (default 127.0.0.1). Anything else requires a password.
   --version         Print the version
+  --updated         (used by the updater) wait for the previous version to quit, do not open a window
 
 Data location (default): Windows %APPDATA%\\Pennystead, macOS ~/Library/Application Support/Pennystead, Linux ~/.local/share/pennystead`);
   process.exit(0);
@@ -51,10 +52,17 @@ function openBrowser(url) {
   const { start } = require('./server');
   const { DATA_DIR } = require('./lib/config');
   const port = +process.env.PENNYSTEAD_PORT || +process.env.PORT || 3456;
+  // After an in-app update the old version may still be shutting down: wait for the port instead of giving up.
+  const updated = flag('--updated');
+  const listen = async () => {
+    for (let i = 0; ; i++) {
+      try { return await start({ port }); } catch (e) { if (!updated || e.code !== 'EADDRINUSE' || i >= 40) throw e; await new Promise((r) => setTimeout(r, 500)); }
+    }
+  };
   try {
-    const s = await start({ port });
+    const s = await listen();
     console.log(`\n  Pennystead ${VERSION} is running\n\n    Open:  ${s.url}\n    Data:  ${DATA_DIR}\n\n  Keep this window open while you use Pennystead.\n  Close it (or press Ctrl+C) to quit.\n`);
-    openBrowser(s.url);
+    if (!updated) openBrowser(s.url); // after an update the open window reloads itself
     const quit = () => s.stop().then(() => process.exit(0));
     process.on('SIGINT', quit); process.on('SIGTERM', quit);
   } catch (e) {

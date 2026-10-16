@@ -31,7 +31,14 @@ Name: "{autoprograms}\Pennystead"; Filename: "{app}\pennystead.exe"; IconFilenam
 Name: "{autodesktop}\Pennystead"; Filename: "{app}\pennystead.exe"; Tasks: desktopicon
 [Run]
 Filename: "{app}\pennystead.exe"; Description: "Start Pennystead now"; Flags: nowait postinstall skipifsilent
+; In-app update (silent install with /RELAUNCH=1): start the new version again; its open window reloads by itself.
+Filename: "{app}\pennystead.exe"; Parameters: "--updated"; Flags: nowait; Check: Relaunch
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/IM pennystead.exe /F"; Flags: runhidden; RunOnceId: "StopPennystead"
 [Messages]
 FinishedLabel=Pennystead is installed. Your data is kept in %APPDATA%\Pennystead and is not removed if you uninstall.
+[Code]
+function Relaunch(): Boolean;
+begin
+  Result := ExpandConstant('{param:RELAUNCH|0}') = '1';
+end;

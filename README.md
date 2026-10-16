@@ -26,6 +26,8 @@ Your browser opens Pennystead. On Windows and Linux a small window stays open wh
 
 **"Windows protected your PC" / "developer cannot be verified":** these builds are not signed with a paid developer certificate, so your system warns on first launch. Windows: *More info → Run anyway*. macOS: right-click the app → *Open* → *Open* (or *System Settings → Privacy & Security → Open Anyway*). Each release publishes SHA-256 checksums so you can verify the download.
 
+**Updates:** *Settings → Updates* shows when a newer release is out (the sidebar shows **Update to …** too) and installs it with one click. Pennystead downloads the file for your computer from this project's Releases, checks it against the SHA-256 checksum published with it, installs it and restarts, and your open window reloads into the new version. Your data is not touched. Checking is one anonymous request to GitHub at start and every 12 hours; you can switch it off there. On macOS, run Pennystead from Applications (not from the disk image) so it can update itself.
+
 **First steps:** the welcome screen offers four ways in: import a statement, connect your bank, add assets by hand, or explore with sample data (one click to clear). Then switch on encrypted backups (*Settings → Backups*).
 
 **Where your data lives:** Windows `%APPDATA%\Pennystead`, macOS `~/Library/Application Support/Pennystead`, Linux `~/.local/share/pennystead`. Uninstalling does not delete it.

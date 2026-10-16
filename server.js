@@ -23,6 +23,7 @@ const security = require('./lib/security');
 const assets = require('./lib/assets');
 const autostart = require('./lib/autostart');
 const VERSION = require('./lib/version');
+const updater = require('./lib/updater');
 
 const CONSENT_DAYS = +process.env.CONSENT_DAYS || 90;
 const hasSession = () => fs.existsSync(paths.session);
@@ -114,7 +115,7 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
       // ----- app state & data -----
       if (P === '/api/state') {
         const all = store.txs(), accounts = Object.values(store.accounts()).map((a) => ({ name: a.name, label: a.label, currency: a.currency, lastSync: a.lastSync || null, imported: !!a.imported, iban: a.iban ? a.iban.slice(-4) : null, history: coverage('assets:bank:' + a.name, all) }));
-        return json(res, 200, { ...(await core.state()), goalCheck: goalChecks.unseen(), connectPending: !!pendingState, version: VERSION, packaged: PACKAGED, dataDir: DATA_DIR, authRequired: auth.required(), hasData: !demo.isEmpty(), canConnect: configured(), canPrices: !!settings.alphaVantage(), demo: demo.isDemo(), accounts, redirectUrl: redirectUrl(), port });
+        return json(res, 200, { ...(await core.state()), goalCheck: goalChecks.unseen(), update: updater.summary(), connectPending: !!pendingState, version: VERSION, packaged: PACKAGED, dataDir: DATA_DIR, authRequired: auth.required(), hasData: !demo.isEmpty(), canConnect: configured(), canPrices: !!settings.alphaVantage(), demo: demo.isDemo(), accounts, redirectUrl: redirectUrl(), port });
       }
       if (P === '/api/overview') return json(res, 200, await core.overview());
       if (P === '/api/history') return json(res, 200, await core.wealthHistory(q.range));
@@ -145,6 +146,15 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
       if (P === '/api/quit' && METHOD === 'POST') {
         if (!PACKAGED && process.env.PENNYSTEAD_ALLOW_QUIT !== '1') throw HttpError(403, 'Quit is only available in the installed app.');
         json(res, 200, { ok: true }); setTimeout(() => process.exit(0), 200); return;
+      }
+      // ----- updates -----
+      if (P === '/api/update' && METHOD === 'GET') return json(res, 200, q.refresh || !updater.status() ? await updater.check() : updater.status());
+      if (P === '/api/update/auto' && METHOD === 'POST') { updater.setAuto((await readBody(req)).on === true); return json(res, 200, { auto: updater.auto() }); }
+      if (P === '/api/update/install' && METHOD === 'POST') {
+        const r = await updater.install().catch((e) => { throw HttpError(400, e.message); });
+        json(res, 200, { ok: true, ...r });
+        setTimeout(() => process.exit(0), 300); // the new version takes over the port (and the open window reloads)
+        return;
       }
       if (P === '/api/goals/checks') {
         if (METHOD === 'POST') return json(res, 200, goalChecks.run({ force: true }) || { none: true });
@@ -278,13 +288,16 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
   const tick = () => hasSession() && runSync().catch((e) => console.error('sync failed:', e.message));
   // The monthly goal check: hourly is enough to catch the first run of a new month; it does nothing otherwise.
   const gtick = () => { try { goalChecks.run(); } catch (e) { console.error('goal check failed:', e.message); } };
+  // Updates: one anonymous request to GitHub shortly after start and every 12 hours, unless turned off. Installed app only.
+  const utick = () => PACKAGED && updater.auto() && updater.check().catch(() => {});
+  if (PACKAGED) updater.cleanup();
   const btick = () => backup.runBackup().then((r) => r.filter((x) => x.error).forEach((x) => console.error(`backup (${x.dest}) failed: ${x.error}`))).catch((e) => console.error('backup failed:', e.message));
 
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
       server.off('error', reject);
-      timers.push(setInterval(tick, 6 * 3600e3), setInterval(btick, 10 * 60e3), setTimeout(btick, 30e3), setTimeout(tick, 1000), setInterval(gtick, 3600e3), setTimeout(gtick, 60e3));
+      timers.push(setInterval(tick, 6 * 3600e3), setInterval(btick, 10 * 60e3), setTimeout(btick, 30e3), setTimeout(tick, 1000), setInterval(gtick, 3600e3), setTimeout(gtick, 60e3), setTimeout(utick, 20e3), setInterval(utick, 12 * 3600e3));
       timers.forEach((t) => t.unref());
       resolve({ server, port, host, url: `http://localhost:${port}`, stop: () => new Promise((r) => { timers.forEach(clearTimeout); server.close(() => r()); server.closeAllConnections?.(); }) });
     });
