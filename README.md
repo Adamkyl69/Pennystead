@@ -30,7 +30,7 @@ Your browser opens Pennystead. On Windows and Linux a small window stays open wh
 
 **First steps:** the welcome screen offers four ways in: import a statement, connect your bank, add assets by hand, or explore with sample data (one click to clear). Then switch on encrypted backups (*Settings → Backups*).
 
-**Main currency:** everything is totalled in one currency (default EUR), set under *Settings → Banks → Main currency*. When a bank or imported account uses a different one (say TRY), Pennystead asks which to show. Keep a currency your accounts don't use only with exchange rates (Alpha Vantage key, *Update prices*); until a rate exists, Pennystead says which amounts are counted unconverted.
+**Main currency:** Pennystead never assumes one. It uses the currency your bank or imported file reports (the one most of your accounts use), asks you once to confirm, and lets you change it under *Settings → Banks → Main currency*. Accounts in other currencies are converted with exchange rates (Alpha Vantage key, *Update prices*); until a rate exists, Pennystead says which amounts are counted unconverted.
 
 **Where your data lives:** Windows `%APPDATA%\Pennystead`, macOS `~/Library/Application Support/Pennystead`, Linux `~/.local/share/pennystead`. Uninstalling does not delete it.
 

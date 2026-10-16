@@ -2,7 +2,7 @@
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-let BASE = 'EUR', ST = {};
+let BASE = null, ST = {};
 
 async function api(url, method = 'GET', body) {
   const r = await fetch(url, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
@@ -20,6 +20,7 @@ const run = async (fn, ok) => { try { const r = await fn(); if (ok) toast(ok); r
 function money(n, cur = BASE, o = {}) {
   if (n == null || Number.isNaN(+n)) return '—';
   const d = o.d ?? 0;
+  if (!cur) return (+n).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d, signDisplay: o.sign ? 'exceptZero' : 'auto' }); // no currency known yet
   try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: cur, maximumFractionDigits: d, minimumFractionDigits: d, signDisplay: o.sign ? 'exceptZero' : 'auto' }).format(n); }
   catch { return `${(+n).toLocaleString(undefined, { maximumFractionDigits: Math.max(d, 2) })} ${cur}`; }
 }
@@ -257,9 +258,10 @@ function currencyNotice(host) {
   if (!c || ST.demo) return;
   const other = c.accounts.filter((x) => x !== c.base), unconv = Object.entries(c.unconverted || {});
   let html = '';
-  if (!c.confirmed && other.length) {
-    const only = c.accounts.length === 1 ? c.accounts[0] : null;
-    html = `<div class="banner" id="curAsk"><span><b>Which currency should Pennystead show?</b> ${only ? `Your account is in <b>${esc(only)}</b>` : `Your accounts use <b>${c.accounts.map(esc).join(', ')}</b>`}, and amounts are shown in <b>${esc(c.base)}</b>.</span><span class="row">${other.map((x) => `<button class="btn sm primary" data-base="${esc(x)}">Show in ${esc(x)}</button>`).join('')}${c.accounts.includes(c.base) || !only ? `<button class="btn sm" data-keep="1">Keep ${esc(c.base)}</button>` : `<button class="btn sm" data-keep="1">Keep ${esc(c.base)} (needs exchange rates)</button>`}</span></div>`;
+  if (!c.confirmed && c.base && c.accounts.length) {
+    // The main currency was taken from your own accounts; ask once whether that is right.
+    const one = c.accounts.length === 1;
+    html = `<div class="banner" id="curAsk"><span><b>Is ${esc(c.base)} right?</b> ${one ? `Pennystead shows your amounts in <b>${esc(c.base)}</b>, the currency your account reports.` : `Your accounts use <b>${c.accounts.map(esc).join(', ')}</b>. Amounts are shown in <b>${esc(c.base)}</b>, the one most of your accounts use; the others are converted with exchange rates.`}</span><span class="row"><button class="btn sm primary" data-keep="1">Yes, use ${esc(c.base)}</button>${other.map((x) => `<button class="btn sm" data-base="${esc(x)}">Show in ${esc(x)}</button>`).join('')}<a class="btn sm" href="#/banks">Another currency…</a></span></div>`;
   } else if (unconv.length) {
     html = `<div class="banner"><span class="warn">${unconv.map(([cur, n]) => `${n} transaction${n === 1 ? '' : 's'} in <b>${esc(cur)}</b>`).join(', ')} ${unconv.length === 1 && unconv[0][1] === 1 ? 'is' : 'are'} counted as ${esc(c.base)} without conversion, because there is no exchange rate. ${ST.canPrices ? 'Update prices to fetch rates,' : 'Add an Alpha Vantage key in Connections and update prices,'} or change the main currency.</span><span class="row">${ST.canPrices ? '<button class="btn sm" id="curPx">Update prices</button>' : '<a class="btn sm" href="#/connections">Connections</a>'}<a class="btn sm" href="#/banks">Main currency</a></span></div>`;
   }

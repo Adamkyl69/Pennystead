@@ -116,7 +116,9 @@ test('sample data and real data never mix: adding your own data while sample dat
   }
   assert.equal(Object.keys(require('../lib/store').txs()).length, before, 'nothing was added');
   assert.equal((await post(port, '/api/demo/clear', {})).status, 200);
-  assert.equal((await post(port, '/api/manual', { name: 'Car', type: 'vehicle', value: 1000 })).status, 200, 'allowed once the sample data is gone');
+  const noCur = await post(port, '/api/manual', { name: 'Car', type: 'vehicle', value: 1000 });
+  assert.equal(noCur.status, 400, 'no main currency yet, and none given: nothing is assumed'); assert.match(noCur.body, /currency/i);
+  assert.equal((await post(port, '/api/manual', { name: 'Car', type: 'vehicle', value: 1000, currency: 'EUR' })).status, 200, 'allowed once the sample data is gone');
   require('../lib/manual').remove('car');
 });
 

@@ -29,7 +29,7 @@ test('ambiguity: 3-decimal-only amounts and dates no day decides are flagged; a 
 });
 test('stale prices: a week-old stock price and the currency it is quoted in are flagged, fresh ones are not', async () => {
   const old = shiftDays(today(), -20);
-  saveConfig({ ...loadConfig(), holdings: [{ symbol: 'AAPL', qty: 1, since: '2024-01-01' }, { symbol: 'MSFT', qty: 1, since: '2024-01-01' }] });
+  saveConfig({ ...loadConfig(), base: 'EUR', baseConfirmed: true, holdings: [{ symbol: 'AAPL', qty: 1, since: '2024-01-01' }, { symbol: 'MSFT', qty: 1, since: '2024-01-01' }] });
   fs.writeFileSync(paths.prices, `P ${old} AAPL 200 USD\nP ${today()} MSFT 400 USD\nP ${old} USD 0.9 EUR\n`);
   assert.deepEqual((await core.wealth()).stalePrices.map((x) => x.commodity).sort(), ['AAPL', 'USD']);
   fs.writeFileSync(paths.prices, `P ${today()} AAPL 200 USD\nP ${today()} MSFT 400 USD\nP ${today()} USD 0.9 EUR\n`);
