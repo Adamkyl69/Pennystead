@@ -185,7 +185,7 @@ test('Chat with AI: the config shown to the user points at this app and is valid
   const c = JSON.parse(r.body);
   const entry = JSON.parse(c.desktop).mcpServers.pennystead;
   assert.equal(entry.command, process.execPath); assert.ok(entry.args.some((a) => a.endsWith('mcp.js')), 'from source it runs mcp.js');
-  assert.match(c.claudeCode, /^claude mcp add pennystead -- /);
+  assert.match(c.claudeCode, /^claude mcp add pennystead( -e \S+)* -- /); // -e: a data folder that is not the default travels along
   assert.ok(!/key|secret|password/i.test(r.body.replace(/pennystead-test-[^"\\]*/g, '')), 'no credentials in the config');
 });
 

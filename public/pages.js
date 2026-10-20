@@ -155,64 +155,86 @@ function recurringView(el, s) {
 }
 
 // ---------- Manual assets & liabilities (shared by Assets / Liabilities pages) ----------
-const ASSET_TYPES = [['property', 'Property'], ['vehicle', 'Vehicle'], ['pension', 'Pension / retirement'], ['crypto', 'Crypto'], ['savings', 'Savings outside bank sync'], ['business', 'Business / private equity'], ['collectible', 'Collectibles'], ['other', 'Other']];
+const ASSET_TYPES = [['property', 'Property'], ['vehicle', 'Vehicle'], ['investment', 'Investments (stocks, funds)'], ['pension', 'Pension / retirement'], ['crypto', 'Crypto'], ['commodity', 'Precious metals / commodities'], ['savings', 'Savings outside bank sync'], ['business', 'Business / private equity'], ['collectible', 'Collectibles'], ['other', 'Other']];
 const LIAB_TYPES = [['loan', 'Mortgage / secured loan'], ['credit', 'Credit / unsecured debt']];
+const UNIT_TYPES = ['investment', 'crypto', 'commodity']; // these are usually held as a number of units
 const todayISO = () => ST.today || new Date().toISOString().slice(0, 10);
+const qty = (v) => (v == null ? '—' : (+v).toLocaleString(undefined, { maximumFractionDigits: 6 }));
 
-function manualForm(kind) {
-  const liab = kind === 'liability';
-  return `<form id="addForm" class="form" hidden style="margin:0 0 16px;padding-bottom:16px;border-bottom:1px solid var(--line)">
-    <label>Name<input type="text" name="name" required maxlength="60" placeholder="${liab ? 'Mortgage' : 'Flat, Helsinki'}"></label>
-    <label>Type<select name="type">${(liab ? LIAB_TYPES : ASSET_TYPES).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></label>
+/** The "Add" form. opts.type preselects a type (the Investments card adds investments). */
+function manualForm(kind, opts = {}) {
+  const liab = kind === 'liability', f = opts.id || 'add';
+  return `<form data-addform="${f}" class="form" hidden style="margin:0 0 16px;padding-bottom:16px;border-bottom:1px solid var(--line)">
+    <label>Name<input type="text" name="name" required maxlength="60" placeholder="${liab ? 'Mortgage' : opts.type === 'investment' ? 'Global index fund' : 'Flat, Helsinki'}"></label>
+    <label>Type<select name="type">${(liab ? LIAB_TYPES : ASSET_TYPES).map(([v, l]) => `<option value="${v}" ${v === opts.type ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <label>Currency<input type="text" name="currency" value="${esc(BASE || '')}" maxlength="5" required placeholder="code" style="text-transform:uppercase"></label>
-    <label>${liab ? 'Current balance owed' : 'Current value'}<input type="number" name="value" step="any" min="0" required></label>
+    ${liab ? '' : `<label class="chk" style="grid-column:1/-1"><input type="checkbox" name="perUnit"> Track in units (shares, fund units, grams, coins…): enter how many you hold and the price of one</label>
+    <label data-u="1">Units held<input type="number" name="units" step="any" min="0"></label>
+    <label data-u="1">Unit name <span class="muted">(optional)</span><input type="text" name="unit" maxlength="20" placeholder="shares, grams, BTC…"></label>
+    <label data-u="1">Price of one unit<input type="number" name="price" step="any" min="0"></label>
+    <label data-u="1">Ticker / ISIN <span class="muted">(optional)</span><input type="text" name="symbol" maxlength="24" style="text-transform:uppercase"></label>`}
+    <label data-u="0">${liab ? 'Current balance owed' : 'Current value'}<input type="number" name="value" step="any" min="0"></label>
     <label>As of<input type="date" name="date" value="${todayISO()}"></label>
     <p class="muted" style="grid-column:1/-1;margin:-2px 0 0;font-size:12px">Your net worth history includes this item from this date. To show it earlier, set an earlier date, or record older values afterwards.</p>
     ${liab ? '' : '<label>Cost basis (optional)<input type="number" name="cost" step="any" min="0"></label><label>Acquired (optional)<input type="date" name="acquired"></label>'}
     ${liab ? '<label class="chk"><input type="checkbox" name="secured" checked> Secured against an asset</label>' : '<label class="chk"><input type="checkbox" name="liquid"> Liquid (can be sold quickly)</label>'}
     <label>Notes<input type="text" name="notes" maxlength="300"></label>
-    <div class="row"><button class="btn primary">Add</button><button type="button" class="btn" id="cancelAdd">Cancel</button></div></form>`;
+    <div class="row"><button class="btn primary">Add</button><button type="button" class="btn" data-cancel="${f}">Cancel</button></div></form>`;
 }
 
-function manualTable(items, kind) {
+function manualTable(items, kind, opts = {}) {
   const liab = kind === 'liability', live = items.filter((a) => !a.closed), closed = items.filter((a) => a.closed);
   const row = (a) => {
     const vals = [...a.valuations].reverse().map((v) => v.value);
     const stale = a.staleDays > 90 && !a.closed;
-    const chg = a.change ? `<span class="${(liab ? -a.change.amount : a.change.amount) >= 0 ? 'good' : 'bad'}">${money(a.change.amount, a.currency, { sign: true })}${a.change.pct != null ? ` (${pct(Math.round(a.change.pct * 10) / 10)})` : ''}</span>` : '<span class="muted">—</span>';
+    const chg = a.change ? `<span class="${(liab ? -a.change.amount : a.change.amount) >= 0 ? 'good' : 'bad'}">${money(a.change.amount, a.currency, { sign: true })}${a.change.pct != null ? ` (${pct(Math.round(a.change.pct * 10) / 10)})` : ''}</span>${a.priceChange ? `<div class="muted" style="font-size:11px">price ${pct(Math.round(a.priceChange.pct * 10) / 10)}</div>` : ''}` : '<span class="muted">—</span>';
     const gain = a.gain ? `<span class="${a.gain.amount >= 0 ? 'good' : 'bad'}">${money(a.gain.amount, a.currency, { sign: true })}${a.gain.pct != null ? ` (${pct(Math.round(a.gain.pct))})` : ''}</span>` : '<span class="muted">—</span>';
-    return `<tr class="click" data-toggle="${a.id}"><td>${esc(a.name)}<span class="tag">${esc(a.typeLabel)}</span>${liab ? `<span class="tag">${a.secured ? 'secured' : 'unsecured'}</span>` : a.liquid ? '<span class="tag">liquid</span>' : ''}${stale ? `<span class="pill warn" style="margin-left:6px">${a.staleDays}d old</span>` : ''}</td>
-      <td>${sparkline(vals, 70, 20)}</td><td class="n">${a.latest ? money(a.latest.value, a.currency) : '—'}${a.currency !== BASE && a.valueBase != null ? `<div class="muted" style="font-size:11px">≈ ${money(Math.abs(a.valueBase))}</div>` : ''}</td>
+    const unitLine = a.perUnit ? `<div class="muted" style="font-size:11px">${qty(a.units)} ${esc(a.unit || 'units')} × ${money2(a.price ?? 0, a.currency)}</div>` : '';
+    const upd = a.perUnit
+      ? `<input type="number" name="units" step="any" min="0" value="${a.units ?? ''}" placeholder="Units" title="Units held" style="width:110px"><input type="number" name="price" step="any" min="0" required placeholder="Price of one unit (${esc(a.currency)})" style="width:190px">`
+      : `<input type="number" name="value" step="any" min="0" required placeholder="${liab ? 'New balance' : 'New value'} (${esc(a.currency)})" style="width:170px">`;
+    const vrow = (v) => `<tr><td class="muted" style="padding:3px 10px">${esc(v.date)}</td>${a.perUnit ? `<td class="n" style="padding:3px 10px">${qty(v.units)}</td><td class="n" style="padding:3px 10px">${v.price != null ? money2(v.price, a.currency) : '—'}</td>` : ''}<td class="n" style="padding:3px 10px">${money(v.value, a.currency, { d: 2 })}</td><td class="muted" style="padding:3px 10px">${esc(v.note || '')}</td><td class="n" style="padding:3px 10px"><button class="btn sm" data-rmval="${a.id}|${v.date}" title="Delete this entry">×</button></td></tr>`;
+    return `<tr class="click" data-toggle="${a.id}"><td>${esc(a.name)}${a.symbol && a.symbol !== a.name.toUpperCase() ? `<span class="tag">${esc(a.symbol)}</span>` : ''}${opts.hideType ? '' : `<span class="tag">${esc(a.typeLabel)}</span>`}${liab ? `<span class="tag">${a.secured ? 'secured' : 'unsecured'}</span>` : a.liquid && !opts.hideType ? '<span class="tag">liquid</span>' : ''}${stale ? `<span class="pill warn" style="margin-left:6px">${a.staleDays}d old</span>` : ''}</td>
+      <td>${sparkline(vals, 70, 20)}</td><td class="n">${a.latest ? money(a.latest.value, a.currency) : '—'}${unitLine}${a.currency !== BASE && a.valueBase != null ? `<div class="muted" style="font-size:11px">≈ ${money(Math.abs(a.valueBase))}</div>` : ''}</td>
       <td class="n">${chg}</td>${liab ? '' : `<td class="n">${gain}</td>`}<td class="muted">${esc(a.latest?.date || '—')}</td><td class="n"><button class="btn sm">Update ▾</button></td></tr>
       <tr data-detail="${a.id}" hidden><td colspan="${liab ? 6 : 7}" style="background:var(--card2)">
-        <form data-upd="${a.id}" class="row" style="margin-bottom:10px"><input type="number" name="value" step="any" min="0" required placeholder="${liab ? 'New balance' : 'New value'} (${esc(a.currency)})" style="width:170px"><input type="date" name="date" value="${todayISO()}"><input type="text" name="note" placeholder="Note (optional)" style="width:200px"><button class="btn primary sm">Save value</button></form>
-        <table style="min-width:0"><tbody>${a.valuations.map((v) => `<tr><td class="muted" style="padding:3px 10px">${esc(v.date)}</td><td class="n" style="padding:3px 10px">${money(v.value, a.currency, { d: 2 })}</td><td class="muted" style="padding:3px 10px">${esc(v.note || '')}</td><td class="n" style="padding:3px 10px"><button class="btn sm" data-rmval="${a.id}|${v.date}" title="Delete this entry">×</button></td></tr>`).join('')}</tbody></table>
+        <form data-upd="${a.id}" class="row" style="margin-bottom:10px">${upd}<input type="date" name="date" value="${todayISO()}"><input type="text" name="note" placeholder="Note (optional)" style="width:200px"><button class="btn primary sm">Save value</button></form>
+        ${a.perUnit ? `<p class="muted" style="margin:-4px 0 10px;font-size:12px">Each save adds a dated point: earlier units and prices stay in the history below.</p>` : ''}
+        <table style="min-width:0">${a.perUnit ? '<thead><tr><th style="padding:3px 10px">Date</th><th class="n" style="padding:3px 10px">Units</th><th class="n" style="padding:3px 10px">Unit price</th><th class="n" style="padding:3px 10px">Value</th><th></th><th></th></tr></thead>' : ''}<tbody>${a.valuations.map(vrow).join('')}</tbody></table>
         <div class="row" style="margin-top:10px">${a.closed ? `<button class="btn sm" data-reopen="${a.id}">Reopen</button>` : `<button class="btn sm" data-close="${a.id}">${liab ? 'Mark as repaid' : 'Mark as sold / closed'}</button>`}<button class="btn sm danger" data-del="${a.id}">Delete…</button></div></td></tr>`;
   };
   const head = `<thead><tr><th>Name</th><th></th><th class="n">${liab ? 'Owed' : 'Value'}</th><th class="n">Since last</th>${liab ? '' : '<th class="n">Gain vs cost</th>'}<th>Updated</th><th></th></tr></thead>`;
-  return `<div class="tbl" style="margin:0"><table>${head}<tbody>${live.map(row).join('') || `<tr><td colspan="7" class="empty">${liab ? 'No liabilities yet. Add a mortgage or loan to include it in net worth.' : 'Nothing yet. Add property, a car, a pension or any asset you want to track.'}</td></tr>`}</tbody></table></div>
+  return `<div class="tbl" style="margin:0"><table>${head}<tbody>${live.map(row).join('') || `<tr><td colspan="7" class="empty">${opts.empty || (liab ? 'No liabilities yet. Add a mortgage or loan to include it in net worth.' : 'Nothing yet. Add property, a car, a pension or any asset you want to track.')}</td></tr>`}</tbody></table></div>
     ${closed.length ? `<details style="margin-top:12px"><summary class="muted" style="cursor:pointer">${closed.length} ${liab ? 'repaid' : 'sold / closed'}</summary><div class="tbl" style="margin:8px 0 0"><table>${head}<tbody>${closed.map(row).join('')}</tbody></table></div></details>` : ''}`;
 }
 
 function wireManual(root, kind) {
-  const form = $('#addForm', root);
-  const open = $('#addBtn', root);
-  if (open) open.onclick = () => { form.hidden = !form.hidden; };
-  if ($('#cancelAdd', root)) $('#cancelAdd', root).onclick = () => (form.hidden = true);
-  if (form) {
-    const typeSel = form.elements.type, sync = () => {
-      const t = typeSel.value;
-      if (form.elements.secured) form.elements.secured.checked = t !== 'credit';
-      if (form.elements.liquid) form.elements.liquid.checked = t === 'crypto' || t === 'savings';
+  $$('[data-addbtn]', root).forEach((b) => (b.onclick = () => { const f = $(`[data-addform="${b.dataset.addbtn}"]`, root); f.hidden = !f.hidden; }));
+  $$('[data-cancel]', root).forEach((b) => (b.onclick = () => ($(`[data-addform="${b.dataset.cancel}"]`, root).hidden = true)));
+  $$('[data-addform]', root).forEach((form) => {
+    const el = form.elements, typeSel = el.type;
+    const show = () => {
+      const u = !!el.perUnit?.checked;
+      $$('[data-u]', form).forEach((l) => (l.hidden = (l.dataset.u === '1') !== u));
+      if (el.units) { el.units.required = u; el.price.required = u; }
+      el.value.required = !u;
     };
-    typeSel.onchange = sync; sync();
-  }
-  if (form) form.onsubmit = async (e) => {
-    e.preventDefault();
-    const f = Object.fromEntries(new FormData(form)), liab = kind === 'liability';
-    const body = { ...f, currency: (f.currency || BASE).toUpperCase(), kind, ...(liab ? { secured: !!f.secured } : { liquid: !!f.liquid }) };
-    await run(() => api('/api/manual', 'POST', body), 'Added'); go();
-  };
+    const sync = () => {
+      const t = typeSel.value;
+      if (el.secured) el.secured.checked = t !== 'credit';
+      if (el.liquid) el.liquid.checked = ['crypto', 'savings', 'investment'].includes(t);
+      if (el.perUnit) el.perUnit.checked = UNIT_TYPES.includes(t);
+      show();
+    };
+    typeSel.onchange = sync; if (el.perUnit) el.perUnit.onchange = show; sync();
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const f = Object.fromEntries(new FormData(form)), liab = kind === 'liability', u = !!f.perUnit;
+      const body = { ...f, currency: (f.currency || BASE).toUpperCase(), kind, perUnit: u, ...(liab ? { secured: !!f.secured } : { liquid: !!f.liquid }) };
+      if (u) delete body.value; else { delete body.units; delete body.price; delete body.unit; }
+      await run(() => api('/api/manual', 'POST', body), 'Added'); go();
+    };
+  });
   $$('[data-toggle]', root).forEach((tr) => (tr.onclick = (e) => { if (e.target.closest('button') && !e.target.closest('.btn.sm')) return; const d = $(`[data-detail="${tr.dataset.toggle}"]`, root); d.hidden = !d.hidden; }));
   $$('[data-upd]', root).forEach((f) => (f.onsubmit = async (e) => { e.preventDefault(); await run(() => api(`/api/manual/${f.dataset.upd}/value`, 'POST', Object.fromEntries(new FormData(f))), 'Value saved'); go(); }));
   $$('[data-rmval]', root).forEach((b) => (b.onclick = async () => { const [id, d] = b.dataset.rmval.split('|'); await run(() => api(`/api/manual/${id}/value/${d}`, 'DELETE'), 'Removed'); go(); }));
@@ -222,25 +244,78 @@ function wireManual(root, kind) {
 }
 
 // ---------- Assets ----------
+// Chart drill-down state: kept while the app is open. group → that group's items; item → its own history.
+const as = { range: '1Y', group: null, item: null };
+const AS_RANGES = [['3M', '3 months'], ['1Y', '1 year'], ['All', 'All time']];
+const assetGroupOf = (a) => (a.type === 'investment' ? 'Investments' : a.typeLabel);
+
 pages.assets = {
   title: 'Assets',
   async render(el) {
-    const w = await api('/api/assets');
+    const [w, h] = await Promise.all([api('/api/assets'), api('/api/assets/history?range=' + as.range)]);
     const acctName = Object.fromEntries((ST.accounts || []).map((a) => [`assets:bank:${a.name}`, a.label || a.name]));
+    const cashName = (acct) => acctName[acct] || (acct.startsWith('assets:cash:') ? acct.split(':').pop().toUpperCase() + ' cash' : acct.split(':').slice(1).join(' › '));
     const cashRows = w.accounts.filter((a) => /^assets:(bank|cash)/.test(a.account));
-    const assets = w.manual.filter((a) => a.kind === 'asset');
+    const assets = w.manual.filter((a) => a.kind === 'asset'), invAssets = assets.filter((a) => a.type === 'investment'), otherAssets = assets.filter((a) => a.type !== 'investment');
     const totalAssets = w.cash + w.investmentsValue + w.liquidManual + w.illiquidAssets;
     const inv = w.investments, invTotal = inv.reduce((s, x) => s + x.value, 0), invCost = inv.reduce((s, x) => s + x.cost, 0);
+
+    // Everything you own, as items in groups (in the main currency). Only positive values have a share.
+    const items = [
+      ...cashRows.map((a) => ({ key: a.account, name: cashName(a.account), group: 'Cash & bank', value: a.value })),
+      ...inv.map((x) => ({ key: x.account, name: x.symbol, group: 'Investments', value: x.value })),
+      ...assets.filter((a) => !a.closed).map((a) => ({ key: a.account, name: a.name, group: assetGroupOf(a), value: a.valueBase || 0, asset: a })),
+    ].filter((x) => x.value > 0);
+    const groupNames = [...new Set(items.map((x) => x.group))];
+    const groups = groupNames.map((g, i) => ({ key: g, name: g, color: COLORS[i % COLORS.length], value: items.filter((x) => x.group === g).reduce((s, x) => s + x.value, 0) })).sort((a, b) => b.value - a.value);
+    if (as.group && !groups.some((g) => g.key === as.group)) as.group = as.item = null;
+    const inGroup = as.group ? items.filter((x) => x.group === as.group).sort((a, b) => b.value - a.value).map((x, i) => ({ ...x, color: COLORS[i % COLORS.length] })) : [];
+    if (as.item && !inGroup.some((x) => x.key === as.item)) as.item = null;
+    const item = inGroup.find((x) => x.key === as.item);
+    const slices = as.group ? inGroup : groups, sliceTotal = slices.reduce((s, x) => s + x.value, 0);
+    const crumbs = `<div class="crumb" style="margin:0 0 10px"><a data-as="">All assets</a>${as.group ? ` › <a data-as="${esc(as.group)}">${esc(as.group)}</a>` : ''}${item ? ` › ${esc(item.name)}` : ''}</div>`;
+    const legendRows = slices.map((x) => `<tr class="click" data-slice="${esc(x.key)}"${as.item && as.item !== x.key ? ' style="opacity:.55"' : ''}><td><span class="sw" style="background:${x.color}"></span>${esc(x.name)}</td><td class="n">${money(x.value)}</td><td class="n muted">${sliceTotal ? Math.round((x.value / sliceTotal) * 100) : 0}%</td></tr>`).join('');
+    const histTitle = item ? `${esc(item.name)} over time` : as.group ? `${esc(as.group)} over time` : 'Assets over time';
+
     el.innerHTML = `
-      <div class="kpis">${kpi('Total assets', money(totalAssets), `${assets.filter((a) => !a.closed).length} manual · ${cashRows.length} cash accounts · ${inv.length} holdings`)}${kpi('Liquid', money(w.cash + w.investmentsValue + w.liquidManual), 'Cash, investments, liquid assets')}${kpi('Illiquid', money(w.illiquidAssets), w.illiquidParts.map((p) => `${esc(p.name)} ${money(p.value)}`).join(', ') || '—')}</div>
+      <div class="kpis">${kpi('Total assets', money(totalAssets), `${otherAssets.filter((a) => !a.closed).length} manual · ${cashRows.length} cash accounts · ${inv.length + invAssets.filter((a) => !a.closed).length} investments`)}${kpi('Liquid', money(w.cash + w.investmentsValue + w.liquidManual), 'Cash, investments, liquid assets')}${kpi('Illiquid', money(w.illiquidAssets), w.illiquidParts.map((p) => `${esc(p.name)} ${money(p.value)}`).join(', ') || '—')}</div>
       ${w.unpriced.length ? `<div class="banner"><span class="warn">No price/FX rate for: ${esc(w.unpriced.join(', '))}</span><a id="px1">Update prices</a></div>` : ''}
       ${staleBanner(w, 'px2')}
-      ${card('Cash &amp; bank accounts', 'Synced from your bank, plus foreign-currency cash from config', `<div class="tbl" style="margin:0"><table><tbody>${cashRows.map((a) => `<tr><td>${esc(acctName[a.account] || (a.account.startsWith('assets:cash:') ? a.account.split(':').pop().toUpperCase() + ' cash' : a.account.split(':').slice(1).join(' › ')))}</td><td class="n">${money(a.value)}</td></tr>`).join('') || '<tr><td class="empty">No accounts yet.</td></tr>'}</tbody></table></div>`)}
-      ${card('Investments', 'Stocks and funds from config.json holdings, valued at the latest price', inv.length ? `<div class="tbl" style="margin:0"><table><thead><tr><th>Holding</th><th class="n">Qty</th><th class="n">Value</th><th class="n">Cost</th><th class="n">Gain</th></tr></thead><tbody>${inv.map((x) => `<tr><td>${esc(x.symbol)}</td><td class="n">${x.qty}</td><td class="n">${money(x.value)}</td><td class="n muted">${money(x.cost)}</td><td class="n ${x.pl >= 0 ? 'good' : 'bad'}">${money(x.pl, BASE, { sign: true })}${x.plPct != null ? ` (${pct(x.plPct)})` : ''}</td></tr>`).join('')}<tr><td><b>Total</b></td><td></td><td class="n"><b>${money(invTotal)}</b></td><td class="n muted">${money(invCost)}</td><td class="n ${invTotal >= invCost ? 'good' : 'bad'}"><b>${money(invTotal - invCost, BASE, { sign: true })}</b></td></tr></tbody></table></div>` : '<p class="empty">No holdings yet. Add them under <code>holdings</code> in data/config.json.</p>', `<button class="btn" id="px">Update prices</button>`)}
-      ${card('Manual assets', 'Property, vehicles, pension, crypto wallets… record a value whenever you like. History builds your net worth chart.', manualForm('asset') + manualTable(assets, 'asset'), '<button class="btn primary" id="addBtn">+ Add asset</button>')}`;
+      ${items.length ? card('Where your assets are', 'Click a slice or a row to see what is inside it and how it changed over time.', `${crumbs}<div class="row" style="align-items:flex-start;gap:24px;flex-wrap:wrap"><div id="alloc" style="flex:0 0 auto"></div><div class="tbl" style="margin:0;flex:1;min-width:260px"><table><tbody>${legendRows}</tbody></table></div></div>`) : ''}
+      ${items.length ? card(histTitle, item?.asset?.perUnit ? `Value in ${esc(BASE)}. Unit price history is below.` : `Value in ${esc(BASE)} at the end of each ${h.step}, using the prices known on that date.`, `<div id="ahist"></div>${item?.asset?.perUnit ? `<h3 style="font-size:13px;margin:16px 0 6px">Price of one ${esc((item.asset.unit || 'unit').replace(/s$/, ''))} (${esc(item.asset.currency)})</h3><div id="aprice"></div>` : ''}`, seg('asRange', AS_RANGES, as.range)) : ''}
+      ${card('Cash &amp; bank accounts', 'Synced from your bank, plus foreign-currency cash from config', `<div class="tbl" style="margin:0"><table><tbody>${cashRows.map((a) => `<tr><td>${esc(cashName(a.account))}</td><td class="n">${money(a.value)}</td></tr>`).join('') || '<tr><td class="empty">No accounts yet.</td></tr>'}</tbody></table></div>`)}
+      ${card('Investments', 'Stocks, funds and ETFs. Record units and the price of one unit, or import a holdings file: each update adds to the history.', `${manualForm('asset', { id: 'inv', type: 'investment' })}${inv.length ? `<div class="tbl" style="margin:0 0 12px"><table><thead><tr><th>Holding <span class="muted" style="font-weight:400">(config.json, priced from Alpha Vantage)</span></th><th class="n">Qty</th><th class="n">Value</th><th class="n">Cost</th><th class="n">Gain</th></tr></thead><tbody>${inv.map((x) => `<tr><td>${esc(x.symbol)}</td><td class="n">${x.qty}</td><td class="n">${money(x.value)}</td><td class="n muted">${money(x.cost)}</td><td class="n ${x.pl >= 0 ? 'good' : 'bad'}">${money(x.pl, BASE, { sign: true })}${x.plPct != null ? ` (${pct(x.plPct)})` : ''}</td></tr>`).join('')}<tr><td><b>Total</b></td><td></td><td class="n"><b>${money(invTotal)}</b></td><td class="n muted">${money(invCost)}</td><td class="n ${invTotal >= invCost ? 'good' : 'bad'}"><b>${money(invTotal - invCost, BASE, { sign: true })}</b></td></tr></tbody></table></div>` : ''}${invAssets.length || !inv.length ? manualTable(invAssets, 'asset', { hideType: true, empty: 'No investments yet. Add one, or import a holdings file from your broker.' }) : ''}`,
+        `<span class="row"><a class="btn" href="#/import" data-impinv="1">Import file</a>${inv.length ? '<button class="btn" id="px">Update prices</button>' : ''}<button class="btn primary" data-addbtn="inv">+ Add investment</button></span>`)}
+      ${card('Manual assets', 'Property, vehicles, pension, crypto wallets… record a value whenever you like. History builds your net worth chart.', manualForm('asset') + manualTable(otherAssets, 'asset'), '<button class="btn primary" data-addbtn="add">+ Add asset</button>')}`;
     wireManual(el, 'asset');
     const px = async () => { const r = await run(() => api('/api/prices', 'POST')); toast(r.errors?.length ? r.errors[0] : `Updated ${r.updated.length} prices`); go(); };
-    $('#px', el).onclick = px; for (const id of ['#px1', '#px2']) if ($(id, el)) $(id, el).onclick = px;
+    for (const id of ['#px', '#px1', '#px2']) if ($(id, el)) $(id, el).onclick = px;
+    $$('[data-impinv]', el).forEach((a) => (a.onclick = () => { imp.mode = 'investments'; }));
+    if (!items.length) return;
+
+    // Drill-down: all assets → a group → one item. The chart below follows what is selected.
+    const pick = (key) => { if (!as.group) { as.group = key; as.item = null; } else as.item = as.item === key ? null : key; go(); };
+    donut($('#alloc', el), { slices, selected: as.item, onSelect: pick, label: as.group || 'Total assets' });
+    $$('[data-slice]', el).forEach((r) => (r.onclick = () => pick(r.dataset.slice)));
+    $$('[data-as]', el).forEach((a) => (a.onclick = () => { as.group = a.dataset.as || null; as.item = null; go(); }));
+    onSeg(el, 'asRange', (v) => { as.range = v; go(); });
+    const fmtX = (d) => (h.step === 'month' ? keyLabel(d.slice(0, 7)) : dayLabel(d));
+    const host = $('#ahist', el);
+    if (!h.dates.length) { host.innerHTML = '<p class="empty">Not enough history yet.</p>'; return; }
+    if (item) {
+      const it = h.items.find((x) => x.account === item.key);
+      lineChart(host, { series: [{ name: item.name, color: item.color, points: h.dates.map((d, i) => ({ x: d, y: it ? it.values[i] : null })) }], fmtX });
+      if (item.asset?.perUnit) {
+        const pts = [...item.asset.valuations].reverse().filter((v) => v.price != null).map((v) => ({ x: v.date, y: v.price }));
+        lineChart($('#aprice', el), { series: [{ name: 'Unit price', color: 'var(--s2)', points: pts }], height: 180, fmtX: dayLabel, fmtTip: (v) => money2(v, item.asset.currency) });
+      }
+      return;
+    }
+    // Stacked by group, or by the items of the selected group.
+    const parts = as.group ? inGroup.map((x) => ({ key: x.key, name: x.name, color: x.color, values: h.items.find((i) => i.account === x.key)?.values || [] })) : groups.map((g) => ({ key: g.key, name: g.name, color: g.color, values: h.groups.find((x) => x.name === g.key)?.values || [] }));
+    const buckets = h.dates.map((d, i) => { const g = Object.fromEntries(parts.map((p) => [p.key, Math.max(0, p.values[i] || 0)])); return { key: d, total: Object.values(g).reduce((s, v) => s + v, 0), groups: g }; });
+    host.innerHTML = '<div id="ahb"></div>' + legend(parts);
+    stackedBars($('#ahb', el), { buckets, groups: parts, labelOf: fmtX, onSelect: null });
   },
 };
 
@@ -250,7 +325,7 @@ pages.liabilities = {
   async render(el) {
     const w = await api('/api/assets'), items = w.manual.filter((a) => a.kind === 'liability');
     el.innerHTML = `<div class="kpis">${kpi('Total owed', money(w.secured + w.unsecured), `${items.filter((a) => !a.closed).length} active`)}${kpi('Secured debt', money(w.secured), 'Mortgages and loans against an asset — reduces illiquid net worth')}${kpi('Unsecured debt', money(w.unsecured), 'Credit and personal loans — reduces liquid net worth')}</div>
-      ${card('Loans &amp; debts', 'Record the balance whenever it changes; your net worth history follows.', manualForm('liability') + manualTable(items, 'liability'), '<button class="btn primary" id="addBtn">+ Add liability</button>')}`;
+      ${card('Loans &amp; debts', 'Record the balance whenever it changes; your net worth history follows.', manualForm('liability') + manualTable(items, 'liability'), '<button class="btn primary" data-addbtn="add">+ Add liability</button>')}`;
     wireManual(el, 'liability');
   },
 };
@@ -417,7 +492,7 @@ pages.goals = {
 const SEV = { high: 'var(--bad)', medium: 'var(--warn)', low: 'var(--muted)' };
 const ANOM = { unusual_amount: 'Unusually large', new_merchant: 'New merchant', duplicate_charge: 'Possible duplicate', category_spike: 'Spending spike', price_increase: 'Price increase' };
 // Review page view state: kept while the app is open.
-const rv = { range: 'all', from: '', to: '', showHidden: false, sort: { m: ['total', -1], a: ['date', -1], s: ['perYear', -1] } };
+const rv = { range: 'all', from: '', to: '', account: '', showHidden: false, sort: { m: ['total', -1], a: ['date', -1], s: ['perYear', -1] } };
 const RV_RANGES = [['30d', '30 days', 30], ['3m', '3 months', 91], ['12m', '12 months', 365], ['all', 'All time', 0]];
 const SEV_RANK = { high: 3, medium: 2, low: 1 };
 function rvSort(list, key) {
@@ -430,25 +505,33 @@ pages.review = {
   title: 'Review',
   async render(el) {
     if (rv.range !== 'custom') { const r = RV_RANGES.find((x) => x[0] === rv.range); rv.from = r?.[2] ? shiftISO(ST.today, -r[2]) : ''; rv.to = ''; }
-    const r = await api(`/api/review?from=${encodeURIComponent(rv.from)}&to=${encodeURIComponent(rv.to)}`);
+    const r = await api(`/api/review?from=${encodeURIComponent(rv.from)}&to=${encodeURIComponent(rv.to)}&account=${encodeURIComponent(rv.account)}`);
+    if (rv.account && !r.account) rv.account = ''; // that account is gone
+    const acctName = (a) => r.accounts.find((x) => x.account === a)?.label || a.split(':').pop();
+    const transfers = r.transfers.filter((x) => rv.showHidden || !x.hidden);
     const show = (x) => rv.showHidden || !x.hidden;
     const subsF = r.subscriptions.active.filter((x) => x.flags.some((f) => f !== 'new'));
-    const nHidden = r.merchants.filter((x) => x.hidden).length + r.anomalies.filter((x) => x.hidden).length + subsF.filter((x) => x.hidden).length;
+    const nHidden = r.merchants.filter((x) => x.hidden).length + r.anomalies.filter((x) => x.hidden).length + subsF.filter((x) => x.hidden).length + r.transfers.filter((x) => x.hidden).length;
     const merchants = rvSort(r.merchants.filter(show), 'm'), an = rvSort(r.anomalies.filter(show), 'a'), subs = rvSort(subsF.filter(show), 's');
     const sure = merchants.filter((m) => !m.hidden && m.suggestion?.confidence >= 0.8); // "Accept all" only takes the confident ones
     const hideBtn = (kind, id, hidden) => `<button class="btn sm" data-hide="${kind}" data-id="${esc(id)}" data-on="${hidden ? 0 : 1}" title="${hidden ? 'Show it in Review again' : 'Stop showing this in Review. Your data is not changed.'}">${hidden ? 'Restore' : 'Hide'}</button>`;
     const dim = (x) => (x.hidden ? ' style="opacity:.55"' : '');
     el.innerHTML = `
       <div class="bar" style="flex-wrap:wrap;gap:8px"><span class="muted">Period</span><span class="seg">${RV_RANGES.map(([k, l]) => `<button class="${rv.range === k ? 'on' : ''}" data-range="${k}">${l}</button>`).join('')}</span>
+        ${r.accounts.length > 1 ? `<select id="rvAcct" aria-label="Bank account"><option value="">All accounts</option>${r.accounts.map((a) => `<option value="${esc(a.account)}" ${a.account === rv.account ? 'selected' : ''}>${esc(a.label)}</option>`).join('')}</select>` : ''}
         <label class="muted row" style="gap:6px">From <input type="date" id="rvFrom" value="${esc(rv.from)}" max="${esc(ST.today)}"></label><label class="muted row" style="gap:6px">to <input type="date" id="rvTo" value="${esc(rv.to)}" max="${esc(ST.today)}"></label>
         <label class="chk row right"><input type="checkbox" id="rvHidden" ${rv.showHidden ? 'checked' : ''}> Show hidden${nHidden ? ` (${nHidden})` : ''}</label></div>
       ${card('Merchants to categorize', 'No rule matched these. Pick a category once and every matching transaction, past and future, follows. Suggestions are learned from what you have already categorized, on this computer.' + (rv.from || rv.to ? ' Counts and totals are for the selected period.' : ''), merchants.length ? `<div class="tbl" style="margin:0"><table><thead><tr>${rvTh('m', 'name', 'Merchant')}${rvTh('m', 'count', 'Transactions', 'n')}${rvTh('m', 'total', 'Total', 'n')}${rvTh('m', 'last', 'Last')}<th>Category</th><th></th></tr></thead><tbody>${merchants.map((m) => `<tr${dim(m)}><td>${esc(m.name)}${m.suggestion ? `<div class="muted" style="font-size:12px">Suggested: ${esc(catLabel(m.suggestion.category))} · ${Math.round(m.suggestion.confidence * 100)}% sure · like ${esc(m.suggestion.because)}</div>` : ''}</td><td class="n">${m.count}</td><td class="n">${money(m.total)}</td><td class="muted">${esc(m.last)}</td>
         <td><select data-m="${esc(m.merchant)}"><option value="">Choose…</option>${catOptions(r.categories.filter((c) => !c.account.endsWith(':uncategorized')), m.suggestion?.category || '', m.dir === 'in' ? 'income' : 'expense')}<option value="__new">＋ New category…</option></select></td><td class="n" style="white-space:nowrap"><button class="btn sm primary" data-save="${esc(m.merchant)}">Apply</button> ${hideBtn('merchant', m.merchant, m.hidden)}</td></tr>`).join('')}</tbody></table></div>` : `<p class="empty">${r.merchants.length ? 'Only hidden merchants in this period.' : rv.from ? 'Nothing to categorize in this period.' : 'Everything is categorized. 🎉'}</p>`, sure.length ? `<button class="btn primary sm" id="acceptAll">Accept ${sure.length} suggestion${sure.length === 1 ? '' : 's'}</button>` : '')}
+      ${transfers.length ? card(`Transfers between your accounts? (${transfers.filter((x) => !x.hidden).length})`, 'The same amount left one of your accounts and arrived in another within a few days. Mark it as an internal transfer and it is left out of spending, income and budgets.', `<div class="tbl" style="margin:0"><table><thead><tr><th>Date</th><th>From</th><th>To</th><th class="n">Amount</th><th></th></tr></thead><tbody>${transfers.map((x) => `<tr${dim(x)}><td class="muted" style="white-space:nowrap">${esc(x.date)}</td><td>${esc(acctName(x.from.account))}<div class="muted" style="font-size:12px">${esc(x.from.desc)} · ${esc(catLabel(x.from.category))}</div></td><td>${esc(acctName(x.to.account))}<div class="muted" style="font-size:12px">${esc(x.to.desc)} · ${esc(x.to.date)} · ${esc(catLabel(x.to.category))}</div></td><td class="n">${money2(x.amount, x.cur)}</td><td class="n" style="white-space:nowrap"><button class="btn sm primary" data-xfer="${esc(x.id)}">Mark as transfer</button> ${hideBtn('transfer', x.id, x.hidden)}</td></tr>`).join('')}</tbody></table></div>`, transfers.filter((x) => !x.hidden).length > 1 ? `<button class="btn primary sm" id="xferAll">Mark all ${transfers.filter((x) => !x.hidden).length} as transfers</button>` : '') : ''}
       ${card(`Unusual activity (${an.filter((x) => !x.hidden).length})`, 'Large or odd charges, duplicates, spikes and price increases.', an.length ? `<div class="tbl" style="margin:0"><table><thead><tr>${rvTh('a', 'date', 'Date')}${rvTh('a', 'type', 'What')}${rvTh('a', 'desc', 'Merchant / category')}${rvTh('a', 'amount', 'Amount', 'n')}${rvTh('a', 'severity', 'Severity')}<th></th></tr></thead><tbody>${an.map((x) => `<tr${dim(x)}><td class="muted" style="white-space:nowrap">${esc(x.date)}</td><td>${esc(ANOM[x.type])}</td><td>${esc(x.type === 'category_spike' ? catLabel(x.desc) : x.desc)}<div class="muted" style="font-size:12px">${esc(x.detail)}</div></td><td class="n">${money2(x.amount)}</td><td><span class="sw" style="background:${SEV[x.severity]};border-radius:50%"></span>${esc(x.severity)}</td><td class="n">${hideBtn('anomaly', x.id, x.hidden)}</td></tr>`).join('')}</tbody></table></div>` : `<p class="empty">${r.anomalies.length ? 'Only hidden items in this period.' : 'Nothing unusual in this period.'}</p>`)}
       ${card('Subscriptions worth a second look', 'Price rises, duplicate charges, overlapping services and costly ones (current subscriptions).', subs.length ? `<div class="tbl" style="margin:0"><table><thead><tr>${rvTh('s', 'merchant', 'Subscription')}${rvTh('s', 'flags', 'Why')}${rvTh('s', 'amount', 'Amount', 'n')}${rvTh('s', 'perYear', 'Per year', 'n')}${rvTh('s', 'lastCharged', 'Last charged')}<th></th></tr></thead><tbody>${subs.map((x) => `<tr${dim(x)}><td>${esc(x.merchant)}</td><td>${x.flags.map((f) => `<span class="pill ${f === 'duplicate_charge' ? 'bad' : 'warn'}" style="margin-right:4px">${esc(f.replace('_', ' '))}</span>`).join('')}</td><td class="n">${money2(x.amount)} / ${esc(x.period.replace('ly', ''))}</td><td class="n muted">${money(x.perYear)}</td><td class="muted">${esc(x.lastCharged || '')}</td><td class="n">${hideBtn('subscription', x.key || x.merchant, x.hidden)}</td></tr>`).join('')}</tbody></table></div>` : `<p class="empty">${subsF.length ? 'Only hidden subscriptions.' : 'No flags.'}</p>`)}`;
     $$('[data-range]', el).forEach((b) => (b.onclick = () => { rv.range = b.dataset.range; go(); }));
     const custom = () => { rv.range = 'custom'; rv.from = $('#rvFrom', el).value; rv.to = $('#rvTo', el).value; if (rv.from && rv.to && rv.from > rv.to) return toast('The start date is after the end date'); go(); };
     $('#rvFrom', el).onchange = custom; $('#rvTo', el).onchange = custom;
+    if ($('#rvAcct', el)) $('#rvAcct', el).onchange = (e) => { rv.account = e.target.value; go(); };
+    if ($('#xferAll', el)) $('#xferAll', el).onclick = async () => { const list = transfers.filter((x) => !x.hidden); if (!confirm(`Mark these ${list.length} pairs as internal transfers? They are left out of spending and income. You can change any of them later on the Transactions page.`)) return; await run(() => api('/api/transactions/category', 'POST', { ids: list.flatMap((p) => [p.from.id, p.to.id]), category: 'transfers:internal' }), `${list.length} transfers marked`); go(); };
+    $$('[data-xfer]', el).forEach((b) => (b.onclick = async () => { const p = r.transfers.find((x) => x.id === b.dataset.xfer); await run(() => api('/api/transactions/category', 'POST', { ids: [p.from.id, p.to.id], category: 'transfers:internal' }), 'Marked as an internal transfer: left out of spending and income'); go(); }));
     $('#rvHidden', el).onchange = (e) => { rv.showHidden = e.target.checked; go(); };
     $$('[data-sort]', el).forEach((th) => (th.onclick = () => { const [k, f] = th.dataset.sort.split('|'), [cur, dir] = rv.sort[k]; rv.sort[k] = [f, cur === f ? -dir : ['name', 'merchant', 'desc', 'type', 'flags'].includes(f) ? 1 : -1]; go(); }));
     $$('[data-hide]', el).forEach((b) => (b.onclick = async () => { const on = b.dataset.on === '1'; await run(() => api('/api/review/hide', 'POST', { kind: b.dataset.hide, id: b.dataset.id, hide: on }), on ? 'Hidden from Review (tick "Show hidden" to bring it back)' : 'Back in Review'); go(); }));
@@ -477,8 +560,14 @@ pages.categories = {
   async render(el) {
     const cats = await api('/api/categories');
     const group = (kind, title) => `<h3 style="font-size:14px;margin:0 0 8px">${title}</h3><div class="tbl"><table><thead><tr><th>Category</th><th>Account</th>${kind === 'expense' ? '<th class="n">Budget</th>' : ''}</tr></thead><tbody>${cats.filter((c) => c.kind === kind).map((c) => `<tr><td>${esc(c.label)}</td><td class="muted">${esc(c.account)}</td>${kind === 'expense' ? `<td class="n"><span class="row" style="justify-content:flex-end;flex-wrap:nowrap"><input type="number" min="0" step="any" value="${c.budget ?? ''}" placeholder="—" data-budget="${esc(c.account)}" style="width:100px;text-align:right"><select data-bper="${esc(c.account)}"><option value="month" ${c.budgetPeriod !== 'year' ? 'selected' : ''}>per month</option><option value="year" ${c.budgetPeriod === 'year' ? 'selected' : ''}>per year</option></select></span></td>` : ''}</tr>`).join('')}</tbody></table></div>`;
-    el.innerHTML = `<div class="bar"><input type="text" id="newCat" placeholder="expenses:hobbies" style="width:260px"><button class="btn" id="addCat">Add category</button><span class="muted">Use colons for sub-categories, e.g. expenses:food:takeaway. Budgets on a parent cover its children. Choose per month or per year.</span></div>${group('expense', 'Expenses')}${group('income', 'Income')}`;
-    $('#addCat', el).onclick = async () => { await run(() => api('/api/categories', 'POST', { account: $('#newCat', el).value.trim().toLowerCase() }), 'Category added'); go(); };
+    el.innerHTML = `<div class="bar" style="flex-wrap:wrap"><select id="newKind" aria-label="Kind"><option value="expenses">Expense</option><option value="income">Income</option><option value="transfers">Internal transfer</option></select><input type="text" id="newCat" placeholder="hobbies" style="width:220px" aria-label="Name"><button class="btn" id="addCat">Add category</button><span class="muted">Use colons for sub-categories, e.g. food:takeaway. Budgets on a parent cover its children. Choose per month or per year.</span></div>${group('expense', 'Expenses')}${group('income', 'Income')}
+      ${group('transfer', 'Internal transfers')}<p class="muted" style="font-size:12px;margin:-6px 0 16px">Money moved between your own accounts (to savings, paying off your own card, between banks). These transactions stay in your lists but are left out of spending, income, budgets and every total. <a href="#/review">Review</a> suggests likely transfers.</p>`;
+    $('#addCat', el).onclick = async () => {
+      const kind = $('#newKind', el).value, raw = $('#newCat', el).value.trim().toLowerCase();
+      if (!raw) return toast('Enter a name first');
+      const account = /^(expenses|income|transfers)(:|$)/.test(raw) ? raw : `${kind}:${raw.split(':').map((x) => x.trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')).filter(Boolean).join(':')}`;
+      await run(() => api('/api/categories', 'POST', { account }), 'Category added'); go();
+    };
     $$('input[data-budget]', el).forEach((i) => {
       const per = $(`select[data-bper="${CSS.escape(i.dataset.budget)}"]`, el);
       const save = () => run(() => api('/api/budget', 'PUT', { category: i.dataset.budget, amount: i.value === '' ? null : +i.value, period: per.value }), 'Budget saved');
@@ -513,6 +602,7 @@ pages.rules = {
 pages.banks = {
   title: 'Banks',
   async render(el) {
+    const auto = await api('/api/sync/status');
     const mask = (s) => (s ? `••••${esc(s.slice(-4))}` : '—');
     const mon = (m) => new Date(m.slice(0, 7) + '-01T00:00:00Z').toLocaleDateString(undefined, { month: 'short', year: 'numeric', timeZone: 'UTC' });
     // Consecutive empty months read as one range: "Dec 2025 – Sep 2026".
@@ -521,24 +611,29 @@ pages.banks = {
     const gapped = (ST.accounts || []).filter((a) => !a.imported && a.history?.gaps?.length);
     el.innerHTML = `
       ${ST.demo ? '<div class="banner"><span>You are looking at generated demo data. Nothing here is real.</span></div>' : ''}
-      ${card('Bank connection', ST.connected ? `${esc(ST.bank?.name || 'Connected')} · consent valid until ${esc((ST.validUntil || '').slice(0, 10))}` : 'Connect through Enable Banking (read-only access to balances and transactions).',
-        ST.connected ? `<div class="tbl" style="margin:0"><table><thead><tr><th>Account</th><th>Number</th><th>Currency</th><th>History</th><th>Last sync</th></tr></thead><tbody>${(ST.accounts || []).map((a) => `<tr><td>${esc(a.label || a.name)}</td><td class="muted">${mask(a.iban)}</td><td>${esc(a.currency || '')}</td><td>${histCell(a.history)}</td><td class="muted">${a.imported ? 'imported file' : esc(a.lastSync || '—')}</td></tr>`).join('')}</tbody></table></div>
-          ${gapped.length ? `<div class="banner" style="margin-top:12px"><span><b>Some months have no transactions.</b> ${gapped.map((a) => `${esc(a.label || a.name)}: ${esc(gapText(a.history.gaps))}`).join(' · ')}. The bank may have sent only part of your history. Try <b>Fetch full history</b>. If the months are still empty, banks often release older history only in the first minutes after you approve access: <b>Disconnect</b>, connect again, and Pennystead fetches everything straight away. You can also <a href="#/import">import a statement file</a> for those months into the same account (duplicates are skipped).</span></div>` : ''}
-          <div class="row" style="margin-top:12px"><button class="btn primary" id="syncNow">Sync now</button><button class="btn" id="syncFull">Fetch full history</button><button class="btn danger" id="off">Disconnect</button></div>`
-        : ST.demo ? '<p class="empty">Demo mode: connecting is disabled.</p>' : ST.canConnect ? `<div class="row"><select id="country">${['FI', 'SE', 'NO', 'DK', 'DE', 'FR', 'GB', 'NL', 'ES', 'IT', 'PL', 'EE', 'LV', 'LT', 'TR'].map((c) => `<option>${c}</option>`).join('')}</select><select id="bank" style="min-width:240px"></select><button class="btn primary" id="go">Connect</button></div><p class="muted">You will approve read-only access at your bank, then return here.</p>`
+      ${ST.connected ? card('Connected banks', 'Each bank keeps its own read-only consent. Renew one before it expires to keep it syncing.', `<div class="tbl" style="margin:0"><table><thead><tr><th>Bank</th><th>Accounts</th><th>Consent</th><th></th></tr></thead><tbody>${(ST.banks || []).map((b) => `<tr><td>${esc(b.bank)}${b.country ? ` <span class="muted">${esc(b.country)}</span>` : ''}</td><td>${b.accounts}</td><td>${b.expired ? '<span class="pill bad">expired</span>' : `<span class="muted">valid until ${esc((b.validUntil || '').slice(0, 10) || '—')}</span>`}</td><td class="n" style="white-space:nowrap">${b.country ? `<button class="btn sm" data-renew="${esc(b.bank)}|${esc(b.country)}">${b.expired ? 'Reconnect' : 'Renew'}</button> ` : ''}<button class="btn sm danger" data-off="${esc(b.id)}">Disconnect</button></td></tr>`).join('')}</tbody></table></div>`) : ''}
+      ${ST.connected ? card('Bank accounts', 'Balances and transactions from your banks, plus accounts you imported from files.', `<div class="tbl" style="margin:0"><table><thead><tr><th>Account</th><th>Bank</th><th>Number</th><th>Currency</th><th>History</th><th>Last sync</th></tr></thead><tbody>${(ST.accounts || []).map((a) => `<tr><td>${esc(a.label || a.name)}</td><td class="muted">${esc((ST.banks || []).find((b) => b.id === a.bank)?.bank || (a.imported ? 'imported' : '—'))}</td><td class="muted">${mask(a.iban)}</td><td>${esc(a.currency || '')}</td><td>${histCell(a.history)}</td><td class="muted">${a.imported ? 'imported file' : esc(a.lastSync || '—')}</td></tr>`).join('')}</tbody></table></div>
+          ${gapped.length ? `<div class="banner" style="margin-top:12px"><span><b>Some months have no transactions.</b> ${gapped.map((a) => `${esc(a.label || a.name)}: ${esc(gapText(a.history.gaps))}`).join(' · ')}. The bank may have sent only part of your history. Try <b>Fetch full history</b>. If the months are still empty, banks often release older history only in the first minutes after you approve access: <b>Renew</b> that bank's connection, and Pennystead fetches everything straight away. You can also <a href="#/import">import a statement file</a> for those months into the same account (duplicates are skipped).</span></div>` : ''}
+          <div class="row" style="margin-top:12px"><button class="btn primary" id="syncNow">Sync now</button><button class="btn" id="syncFull">Fetch full history</button></div>`) : ''}
+      ${card('Automatic sync', ST.connected ? 'Pennystead syncs your banks on its own while it is running, so you do not need to press <b>Sync banks</b>.' : 'Once a bank is connected, Pennystead syncs it on its own while it is running.', `<div class="row"><label class="muted" for="autoEvery">Sync</label><select id="autoEvery">${[['6h', 'every 6 hours'], ['12h', 'every 12 hours'], ['24h', 'once a day'], ['off', 'only when I press Sync']].map(([v, l]) => `<option value="${v}" ${auto.every === v ? 'selected' : ''}>${l}</option>`).join('')}</select><span class="muted" id="autoInfo">${auto.syncing ? 'Syncing now…' : `Last synced ${auto.lastAt ? esc(ago(auto.lastAt)) : 'never'}${auto.nextAt ? ` · next ${Date.parse(auto.nextAt) <= Date.now() + 60e3 ? 'in a moment' : 'around ' + esc(new Date(auto.nextAt).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }))}` : ''}`}</span></div>
+        ${auto.lastAuto?.errors?.length ? `<p class="bad" style="margin:10px 0 0;font-size:13px">Last automatic sync: ${auto.lastAuto.errors.map(esc).join(' · ')}</p>` : ''}
+        <p class="muted" style="margin:10px 0 0;font-size:12px">Banks allow about four automatic syncs a day, so every 6 hours is the most frequent. Syncing runs only while Pennystead is open: turn on <a href="#/security">Start with my computer</a> to keep it running in the background.</p>`)}
+      ${ST.demo ? '' : card(ST.connected ? 'Add another bank' : 'Bank connection', ST.connected ? 'Connect accounts at another bank. Your current banks stay connected.' : 'Connect through Enable Banking (read-only access to balances and transactions).', ST.canConnect ? `<div class="row"><select id="country">${['FI', 'SE', 'NO', 'DK', 'DE', 'FR', 'GB', 'NL', 'ES', 'IT', 'PL', 'EE', 'LV', 'LT', 'TR', 'AT', 'BE', 'IE', 'PT'].map((c) => `<option>${c}</option>`).join('')}</select><select id="bank" style="min-width:240px"></select><button class="btn primary" id="go">Connect</button></div><p class="muted">You will approve read-only access at your bank, then return here.${ST.connected ? ' To add more accounts from a bank that is already connected, use <b>Renew</b> above and choose the accounts at your bank.' : ''}</p>`
         : '<p class="empty">To connect a bank, first add your Enable Banking credentials. <a href="#/connections">Set up in Connections →</a></p>')}
-      ${!ST.connected && ST.connectPending ? card('Finish connecting', 'Approved access at your bank but did not come back here? Copy the full address from your browser\'s address bar on the page you ended on, and paste it below.', '<form id="finForm" class="row"><input type="text" name="url" placeholder="https://…?code=…&amp;state=…" style="min-width:320px;flex:1" required><button class="btn primary">Finish</button></form>') : ''}
+      ${ST.connectPending ? card('Finish connecting', 'Approved access at your bank but did not come back here? Copy the full address from your browser\'s address bar on the page you ended on, and paste it below.', '<form id="finForm" class="row"><input type="text" name="url" placeholder="https://…?code=…&amp;state=…" style="min-width:320px;flex:1" required><button class="btn primary">Finish</button></form>') : ''}
       ${card('Main currency', ST.base ? `Everything is shown and totalled in <b>${esc(ST.base)}</b>${ST.currency?.confirmed ? '' : ', taken from your accounts (not confirmed yet)'}. ${ST.currency?.accounts?.length ? `Your accounts use ${ST.currency.accounts.map(esc).join(', ')}.` : ''}` : 'Not set yet. It is taken from your first bank or imported account, and you can set it here.', `<form id="baseForm" class="row"><input type="text" name="base" value="${esc(ST.base || '')}" maxlength="3" required style="width:90px;text-transform:uppercase" aria-label="Currency code">${(ST.currency?.accounts || []).filter((x) => x !== ST.base).map((x) => `<button type="button" class="btn sm" data-setbase="${esc(x)}">Use ${esc(x)}</button>`).join('')}<button class="btn primary">Save</button></form>
         <p class="muted" style="margin:10px 0 0;font-size:12px">Accounts in other currencies are converted with exchange rates (Alpha Vantage key needed). Budget amounts and goal targets keep their numbers when you change this, so adjust them if needed.</p>`)}
       ${card('Prices &amp; exchange rates', ST.canPrices ? 'Alpha Vantage key saved.' : 'Add a free Alpha Vantage key in <a href="#/connections">Connections</a> to fetch stock prices and exchange rates.', '<button class="btn" id="px">Update prices now</button>')}`;
-    if ($('#syncNow', el)) $('#syncNow', el).onclick = async () => { const r = await run(() => api('/api/sync', 'POST')); toast(`Synced: ${r.reduce((s, x) => s + x.added, 0)} new`); go(); };
+    if ($('#syncNow', el)) $('#syncNow', el).onclick = async () => { const r = await run(() => api('/api/sync', 'POST')); toast(syncText(r)); go(); };
     if ($('#syncFull', el)) $('#syncFull', el).onclick = async () => {
       const r = await run(() => api('/api/sync', 'POST', { full: true }));
       const added = r.reduce((s, x) => s + x.added, 0), left = r.filter((x) => x.gaps?.length);
       toast(left.length ? `Fetched ${added} more transactions. Some months are still empty: the bank did not send them.` : `Fetched ${added} more transactions. No empty months.`);
       go();
     };
-    if ($('#off', el)) $('#off', el).onclick = async () => { if (confirm('Disconnect? Your history stays; syncing stops until you reconnect.')) { await api('/api/disconnect', 'POST'); go(); } };
+    $$('[data-off]', el).forEach((b) => (b.onclick = async () => { if (confirm('Disconnect this bank? Its history stays; syncing it stops until you connect it again.')) { await run(() => api('/api/disconnect', 'POST', { id: b.dataset.off }), 'Bank disconnected'); go(); } }));
+    $$('[data-renew]', el).forEach((b) => (b.onclick = async () => { const [name, country] = b.dataset.renew.split('|'); const r = await run(() => api('/api/connect', 'POST', { name, country })); if (r.url) location.href = r.url; }));
+    $('#autoEvery', el).onchange = async (e) => { await run(() => api('/api/sync/auto', 'POST', { every: e.target.value }), e.target.value === 'off' ? 'Automatic sync turned off' : 'Automatic sync saved'); go(); };
     if ($('#go', el)) {
       const load = async () => { $('#bank', el).innerHTML = '<option>Loading…</option>'; try { const b = await api('/api/banks?country=' + $('#country', el).value); $('#bank', el).innerHTML = b.map((x) => `<option>${esc(x.name)}</option>`).join(''); } catch (e) { toast(e.message); } };
       $('#country', el).onchange = load; load();
@@ -672,7 +767,9 @@ pages.backups = {
 
 // ---------- Import (CSV / Excel) ----------
 const IMP_STATUS = { new: ['new', 'good'], duplicate: ['duplicate', ''], possible_duplicate: ['possible duplicate', 'warn'], overlap: ['overlaps bank sync', 'warn'] };
-const imp = { d: null, step: 'upload', pv: null, done: null, account: '__new', newName: '', newCur: '', opts: {}, balance: '' };
+const imp = { mode: 'transactions', d: null, step: 'upload', pv: null, done: null, account: '__new', newName: '', newCur: '', opts: {}, balance: '' };
+// Investment import wizard (same file upload, its own columns): upload → map → preview → done.
+const inv = { d: null, mapping: null, options: {}, pv: null, done: null };
 
 pages.import = {
   title: 'Import',
@@ -680,6 +777,7 @@ pages.import = {
     // Arriving from another page starts a fresh import; in-wizard navigation (from === 'import') keeps its state.
     if (from !== 'import' && !imp.justDone) Object.assign(imp, { step: 'upload', d: null, done: null, pv: null });
     if (imp.step === 'upload') return impUpload(el);
+    if (imp.mode === 'investments') return imp.step === 'map' ? invMap(el) : imp.step === 'preview' ? invPreview(el) : invDone(el);
     if (imp.step === 'map') return impMap(el);
     if (imp.step === 'preview') return impPreview(el);
     return impDone(el);
@@ -692,20 +790,23 @@ document.addEventListener('click', (e) => {
 });
 
 async function impUpload(el) {
-  const hist = await api('/api/import/history');
+  const invest = imp.mode === 'investments';
+  const [hist, ihist] = await Promise.all([api('/api/import/history'), api('/api/import/investments/history')]);
   el.innerHTML = `
-    ${card('Import transactions', 'Load historical data from a CSV or Excel (.xlsx) export of your bank. You will map the columns, check a preview, and nothing is saved until you confirm. Every import can be undone.',
+    <div class="bar"><span class="muted">What are you importing?</span>${seg('impMode', [['transactions', 'Bank transactions'], ['investments', 'Investments']], imp.mode)}</div>
+    ${card(invest ? 'Import investments' : 'Import transactions', invest ? 'Load a holdings statement or price list (CSV or Excel) from your broker, bank or fund. Each row is one investment: its name or ticker, how many units you hold and the price of one unit. New investments are added; for ones you already have, the new units and price are added to their history, so earlier values are kept. Nothing is saved until you confirm, and every import can be undone.' : 'Load historical data from a CSV or Excel (.xlsx) export of your bank. You will map the columns, check a preview, and nothing is saved until you confirm. Every import can be undone.',
       `<label id="drop" tabindex="0" role="button" style="display:block;border:1.5px dashed var(--line);border-radius:10px;padding:34px 16px;text-align:center;cursor:pointer;color:var(--text2)">
         <div style="font-size:15px;color:var(--text)">Drop a file here or click to choose</div><div class="muted" style="margin-top:6px;font-size:12px">.csv, .tsv, .txt, .xlsx · up to 30 MB · comma, semicolon or tab separated · UTF-8 or Windows-1252</div>
         <input type="file" id="file" accept=".csv,.tsv,.txt,.xlsx,.xlsm,text/csv" class="sr-only"></label>
-      <p class="muted" style="margin:10px 0 0;font-size:12px">Tip: if your bank offers several formats, pick CSV. Old <code>.xls</code> files: open in Excel and Save As .xlsx or CSV. Importing the same file twice is safe: duplicates are detected.</p>`)}
-    ${card('Past imports', 'Undo removes exactly the transactions an import added and restores the account balance.', hist.length ? `<div class="tbl" style="margin:0"><table><thead><tr><th>File</th><th>Account</th><th class="n">Added</th><th>Period</th><th>Imported</th><th></th></tr></thead><tbody>${hist.map((h) => `<tr><td>${esc(h.file)}</td><td>${esc(h.account)}</td><td class="n">${h.added}</td><td class="muted">${esc(h.from || '')} → ${esc(h.to || '')}</td><td class="muted">${esc(new Date(h.at).toLocaleString())}</td><td class="n">${h.undoneAt ? '<span class="muted">undone</span>' : `<button class="btn sm danger" data-undo="${esc(h.id)}">Undo</button>`}</td></tr>`).join('')}</tbody></table></div>` : '<p class="empty">No imports yet.</p>')}`;
+      <p class="muted" style="margin:10px 0 0;font-size:12px">${invest ? 'Tip: a file without a date column is read as of the date you choose. A file without units (just prices) updates the price and keeps the units you hold. Importing the same file twice is safe: values already recorded are skipped.' : 'Tip: if your bank offers several formats, pick CSV. Old <code>.xls</code> files: open in Excel and Save As .xlsx or CSV. Importing the same file twice is safe: duplicates are detected.'}</p>`)}
+    ${invest ? card('Past investment imports', 'Undo removes the investments an import added and the values it recorded (an older value on the same date comes back).', ihist.length ? `<div class="tbl" style="margin:0"><table><thead><tr><th>File</th><th class="n">Investments</th><th class="n">New</th><th>Dates</th><th>Imported</th><th></th></tr></thead><tbody>${ihist.map((h) => `<tr><td>${esc(h.file)}</td><td class="n">${h.investments}</td><td class="n">${h.created}</td><td class="muted">${esc(h.from || '')}${h.to && h.to !== h.from ? ` → ${esc(h.to)}` : ''}</td><td class="muted">${esc(new Date(h.at).toLocaleString())}</td><td class="n">${h.undoneAt ? '<span class="muted">undone</span>' : `<button class="btn sm danger" data-iundo="${esc(h.id)}">Undo</button>`}</td></tr>`).join('')}</tbody></table></div>` : '<p class="empty">No investment imports yet.</p>') : card('Past imports', 'Undo removes exactly the transactions an import added and restores the account balance.', hist.length ? `<div class="tbl" style="margin:0"><table><thead><tr><th>File</th><th>Account</th><th class="n">Added</th><th>Period</th><th>Imported</th><th></th></tr></thead><tbody>${hist.map((h) => `<tr><td>${esc(h.file)}</td><td>${esc(h.account)}</td><td class="n">${h.added}</td><td class="muted">${esc(h.from || '')} → ${esc(h.to || '')}</td><td class="muted">${esc(new Date(h.at).toLocaleString())}</td><td class="n">${h.undoneAt ? '<span class="muted">undone</span>' : `<button class="btn sm danger" data-undo="${esc(h.id)}">Undo</button>`}</td></tr>`).join('')}</tbody></table></div>` : '<p class="empty">No imports yet.</p>')}`;
   const send = async (file) => {
     if (!file) return;
     toast(`Reading ${file.name}…`);
     try {
       const r = await fetch('/api/import/upload', { method: 'POST', headers: { 'x-filename': encodeURIComponent(file.name) }, body: await file.arrayBuffer() });
       const j = await r.json(); if (!r.ok) throw new Error(j.error);
+      if (invest) { Object.assign(inv, { d: await api('/api/import/investments/describe', 'POST', { importId: j.importId }), pv: null, done: null, options: { currency: j.base || '' } }); inv.mapping = { ...inv.d.mapping }; imp.step = 'map'; return go(); }
       Object.assign(imp, { d: j, step: 'map', pv: null, opts: {}, balance: '', newName: file.name.replace(/\.[^.]+$/, ''), newCur: j.base });
       const pa = j.profileAccount; imp.account = pa?.uid && j.accounts.some((a) => a.uid === pa.uid) ? pa.uid : j.accounts.length ? j.accounts[0].uid : '__new';
       if (pa?.name) { imp.account = '__new'; imp.newName = pa.name; imp.newCur = pa.currency || j.base; }
@@ -719,6 +820,64 @@ async function impUpload(el) {
   ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.style.borderColor = 'var(--line)'; }));
   drop.addEventListener('drop', (e) => send(e.dataTransfer.files[0]));
   $$('[data-undo]', el).forEach((b) => (b.onclick = async () => { if (!confirm('Undo this import? The transactions it added will be removed.')) return; await run(() => api('/api/import/undo', 'POST', { id: b.dataset.undo }), 'Import undone'); go(); }));
+  $$('[data-iundo]', el).forEach((b) => (b.onclick = async () => { if (!confirm('Undo this import? Investments it added are removed (with any values you recorded for them since), and the values it recorded for your other investments are taken out.')) return; await run(() => api('/api/import/investments/undo', 'POST', { id: b.dataset.iundo }), 'Import undone'); go(); }));
+  onSeg(el, 'impMode', (v) => { imp.mode = v; go(); });
+}
+
+// ---------- Import investments ----------
+function invMap(el) {
+  const d = inv.d, m = inv.mapping, o = inv.options;
+  const sel = (name, label, hint = '') => `<label>${label}${hint ? ` <span class="muted">${hint}</span>` : ''}${colSel(name, d, m[name])}</label>`;
+  el.innerHTML = `
+    <div class="crumb"><a id="back">← Choose another file</a></div>
+    ${card(esc(d.filename), `${d.rowCount} data rows`, `<div class="tbl" style="margin:0"><table><thead><tr>${d.headers.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${d.sample.map((r) => `<tr>${r.map((c) => `<td class="muted" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`)}
+    <form id="invForm">
+    ${card('Match the columns', 'We guessed these from the headers. You need a name or ticker, and a unit price or a total value.', `<div class="form">
+      ${sel('name', 'Name')}${sel('symbol', 'Ticker / ISIN', '(optional)')}${sel('units', 'Units held', '(shares, fund units…)')}${sel('price', 'Price of one unit')}${sel('value', 'Total value', '(optional, used when there is no price)')}${sel('cost', 'Cost / purchase value', '(optional, for new investments)')}${sel('currency', 'Currency column', '(optional)')}${sel('date', 'Date column', '(optional)')}
+      <label>Date format<select name="dateFormat"><option value="auto" ${m.dateFormat === 'auto' ? 'selected' : ''}>Auto-detect</option><option value="DMY" ${m.dateFormat === 'DMY' ? 'selected' : ''}>Day first (31/12/2024)</option><option value="MDY" ${m.dateFormat === 'MDY' ? 'selected' : ''}>Month first (12/31/2024)</option></select></label>
+      <label>Number format<select name="decimal"><option value="auto" ${m.decimal === 'auto' ? 'selected' : ''}>Auto-detect</option><option value="." ${m.decimal === '.' ? 'selected' : ''}>1,234.56 (dot decimal)</option><option value="," ${m.decimal === ',' ? 'selected' : ''}>1.234,56 (comma decimal)</option></select></label>
+      <label id="asOf" ${m.date != null ? 'hidden' : ''}>Values are as of<input type="date" name="asOf" value="${esc(o.date || d.today)}" max="${esc(d.today)}"></label>
+      <label id="curDef" ${m.currency != null ? 'hidden' : ''}>Currency<input type="text" name="currency" value="${esc(o.currency || '')}" maxlength="5" placeholder="code" style="text-transform:uppercase" required></label></div>`)}
+    <div class="row" style="margin-bottom:24px"><button class="btn primary">Preview →</button><span class="muted" style="font-size:12px">Nothing is saved yet.</span></div></form>`;
+  const form = $('#invForm', el), collect = () => {
+    const f = form.elements;
+    inv.mapping = { ...m, ...Object.fromEntries(['name', 'symbol', 'units', 'price', 'value', 'cost', 'currency', 'date'].map((k) => [k, num(f[k].value)])), dateFormat: f.dateFormat.value, decimal: f.decimal.value };
+    inv.options = { date: f.asOf.value, currency: f.currency.value.toUpperCase() };
+    $('#asOf', form).hidden = inv.mapping.date != null; $('#curDef', form).hidden = inv.mapping.currency != null; f.currency.required = inv.mapping.currency == null;
+  };
+  form.onchange = collect;
+  $('#back', el).onclick = () => { imp.step = 'upload'; go(); };
+  form.onsubmit = async (e) => { e.preventDefault(); collect(); await invRunPreview(); };
+}
+async function invRunPreview() {
+  try { inv.pv = await api('/api/import/investments/preview', 'POST', { importId: inv.d.importId, mapping: inv.mapping, options: inv.options }); imp.step = 'preview'; go(); } catch (e) { toast(e.message); }
+}
+const INV_STATUS = { new: ['new investment', 'good'], update: ['adds to history', ''], same: ['already recorded', 'muted'] };
+function invPreview(el) {
+  const p = inv.pv, c = p.counts, n = c.new + c.update;
+  const units = (v) => (v == null ? '—' : (+v).toLocaleString(undefined, { maximumFractionDigits: 6 }));
+  const before = (r) => (r.previous ? `<span class="muted">${units(r.previous.units)} × ${money2(r.previous.price ?? r.previous.value, r.currency)} <span style="font-size:11px">(${esc(r.previous.date)})</span></span>` : '<span class="muted">—</span>');
+  const delta = (r) => { if (!r.previous) return ''; const d = r.value - r.previous.value; return `<div class="${d >= 0 ? 'good' : 'bad'}" style="font-size:11px">${money(d, r.currency, { sign: true })}</div>`; };
+  el.innerHTML = `
+    <div class="crumb"><a id="back">← Change columns</a> · <a id="restart">Start over</a></div>
+    <div class="kpis">${kpi('Investments in file', String(c.assets), `${c.new ? `${new Set(p.rows.filter((r) => r.status === 'new').map((r) => r.symbol || r.name)).size} new` : 'none new'}`)}${kpi('Values to record', String(n), c.same ? `${c.same} already recorded (skipped)` : '')}${kpi('Detected', p.decimal === ',' ? '1.234,56' : '1,234.56', `dates: ${p.dateOrder === 'MDY' ? 'month first' : 'day first'}`)}</div>
+    ${p.missing.length ? `<div class="banner"><span>Not in this file (kept as they are): ${p.missing.map(esc).join(', ')}.</span></div>` : ''}
+    ${card('Preview', 'For investments you already have, the new units and price are added to their history; the earlier value stays.', `<div class="tbl" style="margin:0"><table><thead><tr><th>Investment</th><th>Date</th><th>Before</th><th class="n">Units</th><th class="n">Unit price</th><th class="n">Value</th><th>Status</th></tr></thead><tbody>${p.rows.map((r) => `<tr style="${r.status === 'same' ? 'opacity:.5' : ''}"><td>${esc(r.name)}${r.symbol && r.symbol !== r.name ? ` <span class="tag">${esc(r.symbol)}</span>` : ''}</td><td class="muted" style="white-space:nowrap">${esc(r.date)}</td><td>${before(r)}</td><td class="n">${units(r.units)}</td><td class="n">${money2(r.price, r.currency)}</td><td class="n">${money2(r.value, r.currency)}${delta(r)}</td><td><span class="pill ${INV_STATUS[r.status][1]}">${INV_STATUS[r.status][0]}</span></td></tr>`).join('')}${p.more ? `<tr><td colspan="7" class="muted">… and ${p.more} more rows</td></tr>` : ''}</tbody></table></div>`)}
+    ${p.errors.length ? card(`Rows with problems (${c.errors})`, 'These rows are skipped. Fix the columns above or correct the file if they should be included.', `<div class="tbl" style="margin:0"><table><tbody>${p.errors.map((e) => `<tr><td class="muted" style="width:70px">row ${e.line}</td><td class="bad" style="width:40%">${esc(e.error)}</td><td class="muted">${esc(e.values)}</td></tr>`).join('')}</tbody></table></div>`) : ''}
+    <div class="row" style="margin-bottom:24px"><button class="btn primary" id="commit" ${n ? '' : 'disabled'}>Import ${n} value${n === 1 ? '' : 's'}</button><button class="btn" id="back2">Back</button></div>`;
+  $('#back', el).onclick = $('#back2', el).onclick = () => { imp.step = 'map'; go(); };
+  $('#restart', el).onclick = () => { imp.step = 'upload'; go(); };
+  $('#commit', el).onclick = async (e) => {
+    e.target.disabled = true; e.target.textContent = 'Importing…';
+    try { inv.done = await api('/api/import/investments/commit', 'POST', { importId: inv.d.importId, mapping: inv.mapping, options: inv.options }); imp.step = 'done'; imp.justDone = true; } catch (er) { toast(er.message); }
+    go();
+  };
+}
+function invDone(el) {
+  const r = inv.done; imp.justDone = false;
+  el.innerHTML = card('Investments imported', `${r.rows} value${r.rows === 1 ? '' : 's'} recorded: ${r.added} new investment${r.added === 1 ? '' : 's'}, ${r.updated} update${r.updated === 1 ? '' : 's'} to ones you had.`, `<div class="row"><a class="btn primary" href="#/assets">View assets</a><button class="btn" id="again">Import another file</button><button class="btn danger" id="undo">Undo this import</button></div>`);
+  $('#again', el).onclick = () => { imp.step = 'upload'; go(); };
+  $('#undo', el).onclick = async () => { if (!confirm('Undo this import?')) return; await run(() => api('/api/import/investments/undo', 'POST', { id: r.batch }), 'Import undone'); imp.step = 'upload'; go(); };
 }
 
 const colSel = (name, d, val, optional = true) => `<select name="${name}">${optional ? '<option value="">(none)</option>' : '<option value="">Choose…</option>'}${d.headers.map((h, i) => `<option value="${i}" ${val === i ? 'selected' : ''}>${esc(h)}</option>`).join('')}</select>`;
@@ -898,7 +1057,7 @@ pages.chat = {
       ${card('Claude Code', 'Run this once in a terminal.', `<pre style="margin:0 0 10px;padding:12px;background:var(--card2);border-radius:8px;overflow:auto;font-size:12px">${esc(c.claudeCode)}</pre><button type="button" class="btn sm" data-copy="${esc(c.claudeCode)}">Copy</button>`)}
       ${card('Guided reviews', 'One click in Claude Desktop: open the + menu in a new chat, choose Pennystead, and pick a review. Claude fetches what it needs and writes it up.', `<div class="tbl" style="margin:0"><table><tbody>${prompts.map((p) => `<tr><td style="white-space:nowrap"><b>${esc(p.title)}</b></td><td class="muted">${esc(p.description)}</td></tr>`).join('')}</tbody></table></div>`)}
       ${card('Or just ask', '', '<ul class="muted" style="margin:0;padding-left:18px;line-height:1.8"><li>What is my net worth, and how has it changed this year?</li><li>Which subscriptions have gone up in price?</li><li>Did anything unusual happen in my spending last month?</li><li>Am I on track with my budgets?</li></ul>')}
-      <p class="muted" style="font-size:12px">Read-only by default. Add <code>--write</code> to the arguments to also let Claude record a new value for a manual asset (for example "my car is worth 15,500 now").</p>`;
+      <p class="muted" style="font-size:12px">Read-only by default. More apps, write access, a connection test and a local address: <a href="#/mcp">Settings → MCP server</a>.</p>`;
     const bubble = (m) => m.role === 'user'
       ? `<div style="display:flex;justify-content:flex-end;margin:10px 0"><div style="max-width:80%;background:var(--accent,#2563eb);color:#fff;padding:8px 12px;border-radius:12px 12px 2px 12px;white-space:pre-wrap">${esc(m.label || m.content)}</div></div>`
       : `<div style="margin:10px 0;max-width:92%"><div style="background:var(--card2);padding:10px 14px;border-radius:12px 12px 12px 2px">${m.error ? `<span class="bad">${esc(m.content)}</span>` : md(m.content)}</div>${m.steps?.length ? `<div class="muted" style="font-size:11px;margin:4px 2px">Looked at: ${[...new Set(m.steps.map((s) => TOOL_LABEL[s.tool] || s.tool))].map(esc).join(', ')}</div>` : ''}</div>`;
@@ -970,6 +1129,51 @@ pages.connections = {
     $('#gForm', el).onsubmit = (e) => { e.preventDefault(); save('/api/settings/google', { clientId: e.target.clientId.value, clientSecret: e.target.clientSecret.value }, 'Saved'); };
     for (const [id, name] of [['ebClear', 'enablebanking'], ['avClear', 'alphavantage'], ['gClear', 'google'], ['orClear', 'openrouter']]) if ($('#' + id, el)) $('#' + id, el).onclick = async () => { if (confirm('Remove these saved credentials?')) { await run(() => api('/api/settings/' + name, 'DELETE'), 'Removed'); go(); } };
     if ($('#ebTest', el)) $('#ebTest', el).onclick = async () => { const r = await run(() => api('/api/settings/test-bank', 'POST')); toast(`Connected to Enable Banking (${r.banks} banks found in Finland)`); };
+  },
+};
+
+// ---------- MCP server ----------
+// Lets AI apps on this computer (Claude Desktop, Claude Code, Cursor, …) read your Pennystead data through MCP.
+const mcpUi = { write: false, app: 'desktop' };
+pages.mcp = {
+  title: 'MCP server',
+  async render(el) {
+    const c = await api('/api/mcp'), cfg = mcpUi.write ? c.write : c.readOnly, h = c.http;
+    const pre = (text) => `<pre style="margin:0 0 10px;padding:12px;background:var(--card2);border-radius:8px;overflow:auto;font-size:12px">${esc(text)}</pre><button type="button" class="btn sm" data-copy="${esc(text)}">Copy</button>`;
+    const generic = JSON.stringify({ mcpServers: { pennystead: cfg.entry } }, null, 2);
+    const APPS = [['desktop', 'Claude Desktop'], ['code', 'Claude Code'], ['other', 'Cursor, VS Code, other apps']];
+    const how = {
+      desktop: ['Open Claude Desktop → Settings → Developer → Edit Config, paste this, save, and restart Claude Desktop. If the file already has "mcpServers", add just the "pennystead" entry inside it.', cfg.desktop],
+      code: ['Run this once in a terminal. Claude Code then has the Pennystead tools in every session.', cfg.claudeCode],
+      other: ['Most apps take the same "mcpServers" entry (Cursor: Settings → MCP → Add new server; VS Code: .vscode/mcp.json under "servers"). The app starts Pennystead\'s MCP server itself when it needs it.', generic],
+    }[mcpUi.app];
+    const read = c.tools.filter((t) => !t.write), writes = c.tools.filter((t) => t.write);
+    el.innerHTML = `
+      ${card('Your data in AI apps', 'Pennystead is an MCP server: AI apps on this computer can look up your net worth, spending, budgets, subscriptions and transactions, and answer questions about them. Nothing leaves this computer until you ask the app something; the app then sends what it looked up to its AI provider. Account and card numbers are masked.', `
+        <div class="row" style="margin-bottom:12px;flex-wrap:wrap"><span class="muted">Access</span>${seg('mcpWrite', [['0', 'Read only'], ['1', 'Read and record values']], mcpUi.write ? '1' : '0')}<span class="muted" style="font-size:12px">${mcpUi.write ? 'The app may also record a new value for a manual asset or investment ("my car is worth 15,500 now"). Nothing else can be changed.' : 'The app can look things up but cannot change anything.'}</span></div>
+        <div class="row" style="margin-bottom:12px;flex-wrap:wrap"><span class="muted">Set up in</span>${seg('mcpApp', APPS, mcpUi.app)}</div>
+        <p class="muted" style="margin:0 0 10px">${esc(how[0])}</p>${pre(how[1])}
+        <div class="row" style="margin-top:14px"><button class="btn" id="mcpTest">Test the MCP server</button><span id="mcpRes" class="muted"></span></div>`)}
+      ${card('Local address (for apps that connect by URL)', h.enabled ? `On: apps on this computer can connect to <code>${esc(h.url)}</code> with the access token below while Pennystead is running.` : 'Some apps connect to an MCP server by address instead of starting it. Turn this on to get a local address and an access token. Only this computer can reach it.', h.enabled ? `
+        <div class="row" style="margin-bottom:10px;flex-wrap:wrap"><span class="muted">Access token</span><input type="password" readonly value="${esc(h.token)}" id="mcpTok" style="width:300px;font-family:monospace"><button class="btn sm" id="mcpShow">Show</button><button class="btn sm" data-copy="${esc(h.token)}">Copy</button><button class="btn sm" id="mcpRotate">New token</button></div>
+        <label class="chk row" style="margin-bottom:12px"><input type="checkbox" id="mcpHttpWrite" ${h.write ? 'checked' : ''}> Apps using this address may also record values</label>
+        <p class="muted" style="margin:0 0 6px">Claude Code:</p>${pre(h.claudeCode)}<p class="muted" style="margin:14px 0 6px">Apps with an "mcpServers" config file:</p>${pre(h.json)}
+        <div class="row" style="margin-top:12px"><button class="btn danger" id="mcpOff">Turn off the address</button></div>` : '<button class="btn primary" id="mcpOn">Turn on</button>')}
+      ${card('What apps can do', `${read.length} read-only tools${writes.length ? `, plus ${writes.length} that record values (only with “Read and record values”)` : ''}.`, `<div class="tbl" style="margin:0"><table><tbody>${c.tools.map((t) => `<tr><td style="white-space:nowrap"><code>${esc(t.name)}</code>${t.write ? ' <span class="pill warn">records</span>' : ''}</td><td class="muted">${esc(t.description)}</td></tr>`).join('')}</tbody></table></div>`)}
+      <p class="muted" style="font-size:12px">The MCP server reads the data in <code>${esc(c.dataDir)}</code>. Guided reviews (monthly review, find savings…) appear as prompts in apps that support them, such as Claude Desktop's + menu.</p>`;
+    onSeg(el, 'mcpWrite', (v) => { mcpUi.write = v === '1'; go(); });
+    onSeg(el, 'mcpApp', (v) => { mcpUi.app = v; go(); });
+    $('#mcpTest', el).onclick = async (e) => {
+      const out = $('#mcpRes', el); e.target.disabled = true; out.className = 'muted'; out.textContent = 'Starting the MCP server…';
+      try { const r = await api('/api/mcp/test', 'POST', { write: mcpUi.write }); out.className = r.ok ? 'good' : 'bad'; out.textContent = r.ok ? `✓ Works: Pennystead ${r.version} answered with ${r.tools.length} tools in ${r.ms} ms.` : r.error; } catch (er) { out.className = 'bad'; out.textContent = er.message; }
+      e.target.disabled = false;
+    };
+    const setHttp = async (body, msg) => { await run(() => api('/api/mcp/http', 'POST', body), msg); go(); };
+    if ($('#mcpOn', el)) $('#mcpOn', el).onclick = () => setHttp({ enabled: true, write: false }, 'Local MCP address on');
+    if ($('#mcpOff', el)) $('#mcpOff', el).onclick = () => { if (confirm('Turn off the address? Apps using it stop working until you turn it on again (with a new token).')) setHttp({ enabled: false }, 'Local MCP address off'); };
+    if ($('#mcpRotate', el)) $('#mcpRotate', el).onclick = () => { if (confirm('Make a new token? Apps using the old one must be set up again.')) setHttp({ enabled: true, write: h.write, rotate: true }, 'New token made'); };
+    if ($('#mcpHttpWrite', el)) $('#mcpHttpWrite', el).onchange = (e) => setHttp({ enabled: true, write: e.target.checked }, e.target.checked ? 'Apps on the address may record values' : 'The address is read-only');
+    if ($('#mcpShow', el)) $('#mcpShow', el).onclick = (e) => { const t = $('#mcpTok', el); t.type = t.type === 'password' ? 'text' : 'password'; e.target.textContent = t.type === 'password' ? 'Show' : 'Hide'; };
   },
 };
 

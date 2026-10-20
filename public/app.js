@@ -171,6 +171,33 @@ function flowChart(el, { months, height = 250 }) {
   draw(); onResize(draw);
 }
 
+/**
+ * Donut of shares. slices: [{ key, name, value, color }] (positive values). Clicking a slice calls onSelect(key);
+ * the selected slice stands out. The middle shows the total, or the slice under the pointer.
+ */
+function donut(el, { slices, selected, onSelect, size = 220, label = 'Total' }) {
+  const total = slices.reduce((s, x) => s + x.value, 0);
+  if (!total) { el.innerHTML = '<p class="empty">Nothing to show yet.</p>'; return; }
+  const R = size / 2, r0 = R * 0.62, pt = (a, rad) => [R + rad * Math.sin(a), R - rad * Math.cos(a)];
+  let a0 = 0, paths = '';
+  slices.forEach((x, i) => {
+    const a1 = a0 + (x.value / total) * Math.PI * 2, big = a1 - a0 > Math.PI ? 1 : 0, out = selected === x.key ? 6 : 0;
+    const full = slices.length === 1, mid = (a0 + a1) / 2, dx = out * Math.sin(mid), dy = -out * Math.cos(mid);
+    const [x1, y1] = pt(a0, R - 6), [x2, y2] = pt(a1, R - 6), [x3, y3] = pt(a1, r0), [x4, y4] = pt(a0, r0);
+    const d = full ? `M${R} 6A${R - 6} ${R - 6} 0 1 1 ${R - 0.01} 6ZM${R} ${R - r0}A${r0} ${r0} 0 1 0 ${R + 0.01} ${R - r0}Z` : `M${x1} ${y1}A${R - 6} ${R - 6} 0 ${big} 1 ${x2} ${y2}L${x3} ${y3}A${r0} ${r0} 0 ${big} 0 ${x4} ${y4}Z`;
+    paths += `<path d="${d}" fill="${x.color}" fill-rule="evenodd" stroke="var(--surface)" stroke-width="2" transform="translate(${dx.toFixed(1)} ${dy.toFixed(1)})" opacity="${!selected || selected === x.key ? 1 : 0.45}" data-i="${i}" style="cursor:${onSelect ? 'pointer' : 'default'}"/>`;
+    a0 = a1;
+  });
+  const mid = (t, v) => `<text x="${R}" y="${R - 4}" text-anchor="middle" style="font-size:12px;fill:var(--text2)">${esc(t)}</text><text x="${R}" y="${R + 16}" text-anchor="middle" style="font-size:16px;font-weight:600;fill:var(--text)">${esc(v)}</text>`;
+  el.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="${esc(label)}">${paths}<g id="mid">${mid(label, compact(total))}</g></svg>`;
+  $$('path[data-i]', el).forEach((p) => {
+    const x = slices[+p.dataset.i];
+    p.onmousemove = (e) => { $('#mid', el).innerHTML = mid(x.name.length > 22 ? x.name.slice(0, 21) + '…' : x.name, `${Math.round((x.value / total) * 100)}%`); showTip(`<b>${esc(x.name)}</b><div class="r"><span>Value</span><span>${money(x.value)}</span></div><div class="r"><span>Share</span><span>${((x.value / total) * 100).toFixed(1)}%</span></div>`, e); };
+    p.onmouseleave = () => { $('#mid', el).innerHTML = mid(label, compact(total)); hideTip(); };
+    if (onSelect) p.onclick = () => onSelect(x.key);
+  });
+}
+
 function sparkline(vals, w = 76, h = 22) {
   if (vals.length < 2) return '';
   const lo = Math.min(...vals), hi = Math.max(...vals), y = (v) => 2 + (h - 4) * (1 - (v - lo) / (hi - lo || 1));
@@ -180,7 +207,12 @@ function sparkline(vals, w = 76, h = 22) {
 // ---------- shared UI bits ----------
 const seg = (name, opts, val) => `<div class="seg" data-seg="${name}">${opts.map(([v, l]) => `<button data-v="${esc(v)}" class="${String(v) === String(val) ? 'on' : ''}">${esc(l)}</button>`).join('')}</div>`;
 function onSeg(root, name, fn) { $$(`[data-seg="${name}"] button`, root).forEach((b) => (b.onclick = () => fn(b.dataset.v))); }
-const catOptions = (cats, sel, kind) => cats.filter((c) => !kind || c.kind === kind).map((c) => `<option value="${esc(c.account)}" ${c.account === sel ? 'selected' : ''}>${esc(c.label)}</option>`).join('');
+// Internal transfers fit money in and money out alike, so they are offered for both; with several kinds, each gets a group.
+const catOptions = (cats, sel, kind) => {
+  const list = cats.filter((c) => !kind || c.kind === kind || c.kind === 'transfer'), opt = (c) => `<option value="${esc(c.account)}" ${c.account === sel ? 'selected' : ''}>${esc(c.label)}</option>`;
+  const kinds = [['expense', 'Expenses'], ['income', 'Income'], ['transfer', 'Internal transfers (not counted)']].filter(([k]) => list.some((c) => c.kind === k));
+  return kinds.length < 2 ? list.map(opt).join('') : kinds.map(([k, l]) => `<optgroup label="${l}">${list.filter((c) => c.kind === k).map(opt).join('')}</optgroup>`).join('');
+};
 const kpi = (l, v, d, d2, dcls = '') => `<div class="card kpi"><div class="l">${l}</div><div class="v">${v}</div>${d ? `<div class="d ${dcls}">${d}</div>` : ''}${d2 ? `<div class="d2">${d2}</div>` : ''}</div>`;
 const card = (title, sub, body, actions = '') => `<div class="card"><div class="head"><div><h2>${title}</h2>${sub ? `<div class="sub">${sub}</div>` : ''}</div>${actions}</div>${body}</div>`;
 const budgetBar = (b) => (b ? `<div style="display:flex;gap:8px;align-items:center"><div class="track" style="flex:1"><div class="fill ${b.pct > 100 ? 'over' : ''}" style="width:${Math.min(100, b.pct)}%"></div></div><span class="${b.pct > 100 ? 'bad' : 'muted'}" style="font-size:11px;min-width:34px">${b.pct}%</span></div><div class="muted" style="font-size:11px">of ${money(b.amount)}${b.kind === 'year' ? ' / year · YTD' : ''}</div>` : '');
@@ -200,9 +232,10 @@ const ICONS = {
   goals: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/>', review: '<path d="M4 6l2 2 3-3M4 14l2 2 3-3M12 7h8M12 15h8"/>', categories: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1"/>',
   chat: '<path d="M21 12a8 8 0 0 1-11.5 7.2L4 20l1-4.4A8 8 0 1 1 21 12z"/>', rules: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10M6 12h10"/>', banks: '<path d="M3 10l9-6 9 6M5 10v8M10 10v8M14 10v8M19 10v8M3 20h18"/>', connections: '<path d="M9 7V3M15 7V3M7 7h10v5a5 5 0 0 1-10 0zM12 17v4"/>', security: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>', backups: '<path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/>', import: '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>', sync: '<path d="M21 12a9 9 0 0 1-15 6.7L3 16M3 12a9 9 0 0 1 15-6.7L21 8M3 21v-5h5M21 3v5h-5"/>',
   updates: '<path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>',
+  mcp: '<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01M11 7.5h6M11 16.5h6"/>',
 };
 const NAV = [['overview', 'Overview'], ['spending', 'Spending'], ['goals', 'Goals'], ['assets', 'Assets'], ['liabilities', 'Liabilities'], ['transactions', 'Transactions'], ['import', 'Import'], ['review', 'Review']];
-const SETTINGS = [['categories', 'Categories'], ['rules', 'Rules'], ['banks', 'Banks'], ['backups', 'Backups'], ['connections', 'Connections'], ['chat', 'Chat with AI'], ['security', 'Security'], ['updates', 'Updates']];
+const SETTINGS = [['categories', 'Categories'], ['rules', 'Rules'], ['banks', 'Banks'], ['backups', 'Backups'], ['connections', 'Connections'], ['chat', 'Chat with AI'], ['mcp', 'MCP server'], ['security', 'Security'], ['updates', 'Updates']];
 const ico = (k) => `<svg viewBox="0 0 24 24">${ICONS[k]}</svg>`;
 
 function renderSide(route) {
@@ -216,10 +249,28 @@ function renderSide(route) {
   $('#syncBtn').onclick = async () => {
     if (!ST.connected) return (location.hash = '#/banks');
     const b = $('#syncBtn'); b.disabled = true; b.lastChild.textContent = 'Syncing…';
-    try { const r = await api('/api/sync', 'POST'); toast(`Synced: ${r.reduce((s, x) => s + x.added, 0)} new transactions`); } catch (e) { toast(e.message); }
+    try { toast(syncText(await api('/api/sync', 'POST'))); } catch (e) { toast(e.message); }
     go();
   };
 }
+/** "Synced: 4 new transactions", plus the first bank that failed, if any. */
+const syncText = (r) => { const n = r.reduce((s, x) => s + (x.added || 0), 0), bad = r.filter((x) => x.error); return `Synced: ${n} new transaction${n === 1 ? '' : 's'}${bad.length ? ` · ${bad[0].error}` : ''}`; };
+// Banks sync on their own (server side). When that brings something new, the open page catches up: the sidebar right
+// away, the page itself unless you are in the middle of typing or an import.
+let syncSeen;
+async function watchSync() {
+  if (document.hidden || !ST.connected) return;
+  let s; try { s = await api('/api/sync/status'); } catch { return; }
+  if (syncSeen === undefined || s.syncing) { if (!s.syncing) syncSeen = s.lastAt; return; }
+  if (s.lastAt === syncSeen) return;
+  syncSeen = s.lastAt;
+  const added = s.lastAuto?.added || 0;
+  if (added) toast(`Banks synced: ${added} new transaction${added === 1 ? '' : 's'}`);
+  const busy = document.activeElement?.matches('input,textarea,select') || location.hash.startsWith('#/import');
+  if (busy) { await loadState(); renderSide((location.hash.replace(/^#\//, '') || 'overview').split('?')[0]); } else go();
+}
+setInterval(watchSync, 60e3);
+document.addEventListener('visibilitychange', watchSync);
 const setMenu = (open) => { $('#side').classList.toggle('open', open); $('#burger').setAttribute('aria-expanded', String(open)); };
 $('#burger').onclick = (e) => { e.stopPropagation(); setMenu(!$('#side').classList.contains('open')); };
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setMenu(false); });
