@@ -42,7 +42,7 @@ function ago(iso) {
 const bytes = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 const dayLabel = (d) => `${+d.slice(8)} ${MON[+d.slice(5, 7) - 1]} ${d.slice(2, 4)}`;
 const monthLong = (k) => new Date(k + '-01T00:00:00Z').toLocaleString('en', { month: 'long', year: 'numeric', timeZone: 'UTC' });
-const catLabel = (c) => c.replace(/^(expenses|income):?/, '').split(':').filter(Boolean).map((s) => s[0].toUpperCase() + s.slice(1).replace(/-/g, ' ')).join(' › ') || 'All';
+const catLabel = (c) => c === 'transfers:internal' ? 'Internal transfer' : c.replace(/^(expenses|income|transfers):?/, '').split(':').filter(Boolean).map((s) => s[0].toUpperCase() + s.slice(1).replace(/-/g, ' ')).join(' › ') || 'All';
 const leaf = (c) => catLabel(c).split(' › ').pop();
 const COLORS = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)', 'var(--s6)'];
 
@@ -115,6 +115,28 @@ function lineChart(el, { series, height = 250, fmtX = (x) => x, fmtTip, refs = [
   draw(); onResize(draw);
 }
 
+/** Donut: slices [{key,name,value}]; click a slice for onSelect(key). The centre shows the total (or the hovered slice). */
+function donut(el, { slices, onSelect, height = 260, centre = '' }) {
+  const colorOf = (i) => COLORS[i % COLORS.length], total = slices.reduce((s, x) => s + x.value, 0);
+  const W = Math.min(el.clientWidth || 300, 320), H = height, R = Math.min(W, H) / 2 - 6, r = R * 0.62, cx = W / 2, cy = H / 2;
+  if (!(total > 0)) { el.innerHTML = '<p class="empty">Nothing to show yet.</p>'; return; }
+  let a0 = -Math.PI / 2, out = '';
+  const pt = (rad, a) => `${(cx + rad * Math.cos(a)).toFixed(2)} ${(cy + rad * Math.sin(a)).toFixed(2)}`;
+  slices.forEach((s, i) => {
+    const sweep = Math.min((s.value / total) * Math.PI * 2, Math.PI * 2 - 0.0001), a1 = a0 + sweep, big = sweep > Math.PI ? 1 : 0;
+    out += `<path data-i="${i}" d="M${pt(R, a0)} A${R} ${R} 0 ${big} 1 ${pt(R, a1)} L${pt(r, a1)} A${r} ${r} 0 ${big} 0 ${pt(r, a0)} Z" fill="${colorOf(i)}" opacity="${i >= COLORS.length ? 0.65 : 1}" stroke="var(--surface)" stroke-width="2" style="cursor:pointer" tabindex="0" role="button" aria-label="${esc(s.name)} ${Math.round((s.value / total) * 100)}%"/>`;
+    a0 = a1;
+  });
+  el.innerHTML = `<svg width="${W}" height="${H}" style="display:block;margin:0 auto">${out}<text x="${cx}" y="${cy - 2}" text-anchor="middle" style="fill:var(--text);font-size:15px;font-weight:600" id="dcv">${esc(money(total))}</text><text x="${cx}" y="${cy + 16}" text-anchor="middle" id="dcl">${esc(centre)}</text></svg>`;
+  $$('path[data-i]', el).forEach((p) => {
+    const s = slices[+p.dataset.i];
+    p.onclick = () => onSelect && onSelect(s.key);
+    p.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect && onSelect(s.key); } };
+    p.onmousemove = (e) => showTip(`<b>${esc(s.name)}</b><div class="r"><span>${money(s.value)}</span><span>${Math.round((s.value / total) * 1000) / 10}%</span></div>`, e);
+    p.onmouseleave = hideTip;
+  });
+}
+
 /** Stacked bars. buckets:[{key,total,groups:{g:v}}] groups:[{key,name,color}] */
 function stackedBars(el, { buckets, groups, selected, onSelect, labelOf, height = 260 }) {
   const draw = () => {
@@ -180,7 +202,7 @@ function sparkline(vals, w = 76, h = 22) {
 // ---------- shared UI bits ----------
 const seg = (name, opts, val) => `<div class="seg" data-seg="${name}">${opts.map(([v, l]) => `<button data-v="${esc(v)}" class="${String(v) === String(val) ? 'on' : ''}">${esc(l)}</button>`).join('')}</div>`;
 function onSeg(root, name, fn) { $$(`[data-seg="${name}"] button`, root).forEach((b) => (b.onclick = () => fn(b.dataset.v))); }
-const catOptions = (cats, sel, kind) => cats.filter((c) => !kind || c.kind === kind).map((c) => `<option value="${esc(c.account)}" ${c.account === sel ? 'selected' : ''}>${esc(c.label)}</option>`).join('');
+const catOptions = (cats, sel, kind) => cats.filter((c) => !kind || c.kind === kind || c.kind === 'transfer').map((c) => `<option value="${esc(c.account)}" ${c.account === sel ? 'selected' : ''}>${esc(c.label)}</option>`).join('');
 const kpi = (l, v, d, d2, dcls = '') => `<div class="card kpi"><div class="l">${l}</div><div class="v">${v}</div>${d ? `<div class="d ${dcls}">${d}</div>` : ''}${d2 ? `<div class="d2">${d2}</div>` : ''}</div>`;
 const card = (title, sub, body, actions = '') => `<div class="card"><div class="head"><div><h2>${title}</h2>${sub ? `<div class="sub">${sub}</div>` : ''}</div>${actions}</div>${body}</div>`;
 const budgetBar = (b) => (b ? `<div style="display:flex;gap:8px;align-items:center"><div class="track" style="flex:1"><div class="fill ${b.pct > 100 ? 'over' : ''}" style="width:${Math.min(100, b.pct)}%"></div></div><span class="${b.pct > 100 ? 'bad' : 'muted'}" style="font-size:11px;min-width:34px">${b.pct}%</span></div><div class="muted" style="font-size:11px">of ${money(b.amount)}${b.kind === 'year' ? ' / year · YTD' : ''}</div>` : '');
@@ -295,3 +317,12 @@ document.addEventListener('keydown', (e) => {
 // Make those elements focusable whenever a page renders them.
 new MutationObserver(() => { for (const n of document.querySelectorAll('[data-goto],[data-drill],[data-crumb],[data-budget],[data-setbudget],[data-toggle],a:not([href])')) if (!n.hasAttribute('tabindex') || n.tabIndex < 0) { n.tabIndex = 0; if (n.tagName === 'A') n.setAttribute('role', 'button'); } }).observe(document.body, { childList: true, subtree: true });
 addEventListener('hashchange', go);
+// Background bank syncs: when one finishes while a page is open, show the new data without a click (unless you are typing).
+setInterval(async () => {
+  if (document.hidden || !ST.connected) return;
+  try {
+    const s = (await api('/api/state')).sync, seen = ST.sync?.at;
+    if (s?.at && s.at !== seen && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '')) { toast('Banks synced'); go(); }
+    else if (ST.sync && s) ST.sync = s;
+  } catch { /* offline or logged out: the next real action says so */ }
+}, 60e3);

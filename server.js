@@ -14,6 +14,7 @@ const manual = require('./lib/manual');
 const backup = require('./lib/backup');
 const gdrive = require('./lib/gdrive');
 const importer = require('./lib/importer');
+const investments = require('./lib/investments');
 const J = require('./lib/journal');
 const store = require('./lib/store');
 const demo = require('./lib/demo');
@@ -27,7 +28,10 @@ const updater = require('./lib/updater');
 const llm = require('./lib/llm');
 
 const CONSENT_DAYS = +process.env.CONSENT_DAYS || 90;
-const hasSession = () => fs.existsSync(paths.session);
+const sessions = require('./lib/sessions');
+const mcptokens = require('./lib/mcptokens');
+const mcpHandler = require('./lib/mcp-handler');
+const hasSession = () => sessions.exists();
 const HttpError = (status, message) => Object.assign(new Error(message), { status });
 // Sample data and real data never mix: clearing the sample data must never be able to remove something you added yourself.
 const notInDemo = () => { if (demo.isDemo()) throw HttpError(409, 'You are viewing sample data. Clear it first (top bar → Clear sample data) before adding your own.'); };
@@ -40,7 +44,10 @@ async function readBody(req) {
 }
 
 let pendingState = null, syncing = null;
-const runSync = (opts) => (syncing ??= sync(opts).finally(() => (syncing = null)));
+// Banks allow unattended access about four times a day, so background syncs are 6 hours apart (30 minutes after a failure).
+const SYNC_EVERY = 6 * 3600e3, RETRY_AFTER = 30 * 60e3;
+const syncInfo = { at: null, error: null, next: 0 };
+const runSync = (opts) => (syncing ??= sync(opts).then((r) => { Object.assign(syncInfo, { at: new Date().toISOString(), error: r.find((x) => x.error)?.error || null, next: Date.now() + SYNC_EVERY }); return r; }, (e) => { Object.assign(syncInfo, { error: e.message, next: Date.now() + RETRY_AFTER }); throw e; }).finally(() => (syncing = null)));
 
 async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT || 3456, host = process.env.PENNYSTEAD_HOST || '127.0.0.1' } = {}) {
   const exposed = !security.loopback(host);
@@ -57,7 +64,7 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
     if (q.error) throw HttpError(400, `Your bank did not complete the connection: ${q.error_description || q.error}. Start again from Settings → Banks.`);
     if (!q.code || !pendingState || q.state !== pendingState) throw HttpError(400, 'This link does not match the connection you started (or it was already used). Start again from Settings → Banks.');
     pendingState = null;
-    writeAtomic(paths.session, JSON.stringify(await eb('POST', '/sessions', { code: q.code }), null, 2), { mode: 0o600 });
+    sessions.add(await eb('POST', '/sessions', { code: q.code }));
     await runSync({ full: true }).catch((e) => console.error('initial sync failed:', e.message)); // right after approval is when banks allow the most history
   }
   const GOOGLE_REDIRECT = `http://localhost:${port}/oauth/google/callback`;
@@ -96,6 +103,20 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
         return a ? send(res, 200, a.body, a.type) : send(res, 404, 'Not found', 'text/plain');
       }
 
+      // ----- MCP over HTTP: read-only, for other apps and devices. A bearer token is the only credential here (Settings → Security). -----
+      if (P === '/mcp') {
+        if (!mcptokens.any()) return json(res, 404, { error: 'MCP over HTTP is off. Create an access token under Settings → Security to turn it on.' });
+        const wait = auth.locked(ip);
+        if (wait) return json(res, 429, { error: `Too many attempts. Try again in ${Math.ceil(wait / 60)} minutes.` }, { 'Retry-After': String(wait) });
+        if (!mcptokens.verify(req.headers.authorization)) { auth.failed(ip); return json(res, 401, { error: 'Missing or wrong bearer token.' }, { 'WWW-Authenticate': 'Bearer realm="pennystead"' }); }
+        auth.succeeded(ip);
+        if (METHOD !== 'POST') return json(res, 405, { error: 'Send JSON-RPC messages with POST.' }, { Allow: 'POST' });
+        const msg = await readBody(req);
+        const out = Array.isArray(msg) ? (await Promise.all(msg.map((m) => mcpHandler.handle(m)))).filter(Boolean) : await mcpHandler.handle(msg);
+        if (!out || (Array.isArray(out) && !out.length)) { res.writeHead(202, security.headers()); return res.end(); } // notifications get no answer
+        return json(res, 200, out);
+      }
+
       // ----- everything else needs a login when a password is set -----
       if (!auth.authenticated(req)) {
         if (P.startsWith('/api/')) return json(res, 401, { error: 'Login required', login: true });
@@ -115,8 +136,8 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
 
       // ----- app state & data -----
       if (P === '/api/state') {
-        const all = store.txs(), accounts = Object.values(store.accounts()).map((a) => ({ name: a.name, label: a.label, currency: a.currency, lastSync: a.lastSync || null, imported: !!a.imported, iban: a.iban ? a.iban.slice(-4) : null, history: coverage('assets:bank:' + a.name, all) }));
-        return json(res, 200, { ...(await core.state()), goalCheck: goalChecks.unseen(), update: updater.summary(), connectPending: !!pendingState, version: VERSION, packaged: PACKAGED, dataDir: DATA_DIR, authRequired: auth.required(), hasData: !demo.isEmpty(), canConnect: configured(), canPrices: !!settings.alphaVantage(), ai: settings.openRouter() ? { model: settings.openRouter().model } : null, demo: demo.isDemo(), accounts, redirectUrl: redirectUrl(), port });
+        const all = store.txs(), accounts = Object.values(store.accounts()).map((a) => ({ name: a.name, label: a.label, bank: a.bank || null, currency: a.currency, lastSync: a.lastSync || null, imported: !!a.imported, iban: a.iban ? a.iban.slice(-4) : null, history: coverage('assets:bank:' + a.name, all) }));
+        return json(res, 200, { ...(await core.state()), sync: { auto: loadConfig().autoSync !== false, at: syncInfo.at, error: syncInfo.error, running: !!syncing, next: syncInfo.next ? new Date(syncInfo.next).toISOString() : null }, goalCheck: goalChecks.unseen(), update: updater.summary(), connectPending: !!pendingState, version: VERSION, packaged: PACKAGED, dataDir: DATA_DIR, authRequired: auth.required(), hasData: !demo.isEmpty(), canConnect: configured(), canPrices: !!settings.alphaVantage(), ai: settings.openRouter() ? { model: settings.openRouter().model } : null, demo: demo.isDemo(), accounts, redirectUrl: redirectUrl(), port });
       }
       if (P === '/api/overview') return json(res, 200, await core.overview());
       if (P === '/api/history') return json(res, 200, await core.wealthHistory(q.range));
@@ -178,6 +199,10 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
       const gm = P.match(/^\/api\/goals\/([a-f0-9]{8})$/);
       if (gm && METHOD === 'PUT') return json(res, 200, goals.update(gm[1], await readBody(req)));
       if (gm && METHOD === 'DELETE') { goals.remove(gm[1]); return json(res, 200, {}); }
+      if (P === '/api/mcp-tokens' && METHOD === 'GET') return json(res, 200, mcptokens.list());
+      if (P === '/api/mcp-tokens' && METHOD === 'POST') return json(res, 200, mcptokens.create((await readBody(req)).name));
+      const tm = P.match(/^\/api\/mcp-tokens\/([a-f0-9]{10})$/);
+      if (tm && METHOD === 'DELETE') { mcptokens.revoke(tm[1]); return json(res, 200, {}); }
       if (P === '/api/mcp-prompts') return json(res, 200, require('./lib/prompts').list());
       if (P === '/api/mcp-config') {
         const custom = !!(process.env.PENNYSTEAD_DATA || process.env.DATA_DIR);
@@ -226,9 +251,10 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
         c.bankRedirect = url || null; saveConfig(c);
         return json(res, 200, { redirectUrl: redirectUrl() });
       }
+      if (P === '/api/sync/auto' && METHOD === 'POST') { const c = loadConfig(), on = (await readBody(req)).on !== false; saveConfig({ ...c, autoSync: on }); return json(res, 200, { auto: on }); }
       if (P === '/api/sync' && METHOD === 'POST') { notInDemo(); const b = await readBody(req).catch(() => ({})); return json(res, 200, await runSync({ full: b?.full === true })); }
       if (P === '/api/prices' && METHOD === 'POST') return json(res, 200, await updatePrices());
-      if (P === '/api/disconnect' && METHOD === 'POST') { fs.rmSync(paths.session, { force: true }); return json(res, 200, {}); }
+      if (P === '/api/disconnect' && METHOD === 'POST') { const b = await readBody(req).catch(() => ({})); sessions.remove(typeof b?.id === 'string' ? b.id : null); return json(res, 200, {}); }
 
       // ----- import -----
       if (P === '/api/import/upload' && METHOD === 'POST') return json(res, 200, importer.upload(await readRaw(req, 31e6), decodeURIComponent(req.headers['x-filename'] || 'upload.csv')));
@@ -237,6 +263,20 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
       if (P === '/api/import/commit' && METHOD === 'POST') { notInDemo(); const b = await readBody(req); return json(res, 200, importer.commit(b.importId, b.mapping, b.account, b.options || {})); }
       if (P === '/api/import/ai-map' && METHOD === 'POST') { const b = await readBody(req); return json(res, 200, await importer.aiMapping(b.importId).catch((e) => { throw HttpError(400, e.message); })); }
       if (P === '/api/import/ai-categories' && METHOD === 'POST') { const b = await readBody(req); return json(res, 200, await importer.aiCategories(b.importId, b.mapping, b.account, b.options || {}).catch((e) => { throw HttpError(400, e.message); })); }
+      // ----- investments (holdings files; each import adds to the history) -----
+      if (P === '/api/investments' && METHOD === 'GET') return json(res, 200, investments.list());
+      if (P === '/api/investments/preview' && METHOD === 'POST') {
+        const b = await readBody(req), r = importer.investmentRows(b.importId, b.mapping || {});
+        return json(res, 200, { ...investments.plan(r.rows, b.options || {}), errors: r.errors.slice(0, 50), errorCount: r.errors.length });
+      }
+      if (P === '/api/investments/commit' && METHOD === 'POST') {
+        notInDemo();
+        const b = await readBody(req), r = importer.investmentRows(b.importId, b.mapping || {});
+        const out = investments.commit(r.rows, { ...(b.options || {}), file: b.file || '' });
+        J.writeDerived();
+        return json(res, 200, out);
+      }
+      if (P === '/api/investments/undo' && METHOD === 'POST') { const out = investments.undo((await readBody(req)).id); J.writeDerived(); return json(res, 200, out); }
       // ----- AI (OpenRouter) -----
       if (P === '/api/ai/test' && METHOD === 'POST') return json(res, 200, await llm.test().catch((e) => { throw HttpError(400, e.message); }));
       if (P === '/api/ai/chat' && METHOD === 'POST') { const b = await readBody(req); return json(res, 200, await llm.chat(b.messages, b.memory || {}).catch((e) => { throw HttpError(400, e.message); })); }
@@ -303,7 +343,8 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
 
   // Keep data fresh: sync on start and every 6 hours while connected; scheduled backups every 10 minutes.
   const timers = [];
-  const tick = () => hasSession() && runSync().catch((e) => console.error('sync failed:', e.message));
+  // Checked every 10 minutes, so a computer that slept through the schedule catches up as soon as it wakes.
+  const tick = () => { if (hasSession() && loadConfig().autoSync !== false && Date.now() >= syncInfo.next) runSync().catch((e) => console.error('sync failed:', e.message)); };
   // The monthly goal check: hourly is enough to catch the first run of a new month; it does nothing otherwise.
   const gtick = () => { try { goalChecks.run(); } catch (e) { console.error('goal check failed:', e.message); } };
   // Updates: one anonymous request to GitHub shortly after start and every 12 hours, unless turned off. Installed app only.
@@ -315,7 +356,7 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
     server.once('error', reject);
     server.listen(port, host, () => {
       server.off('error', reject);
-      timers.push(setInterval(tick, 6 * 3600e3), setInterval(btick, 10 * 60e3), setTimeout(btick, 30e3), setTimeout(tick, 1000), setInterval(gtick, 3600e3), setTimeout(gtick, 60e3), setTimeout(utick, 20e3), setInterval(utick, 12 * 3600e3));
+      timers.push(setInterval(tick, 10 * 60e3), setInterval(btick, 10 * 60e3), setTimeout(btick, 30e3), setTimeout(tick, 1000), setInterval(gtick, 3600e3), setTimeout(gtick, 60e3), setTimeout(utick, 20e3), setInterval(utick, 12 * 3600e3));
       timers.forEach((t) => t.unref());
       resolve({ server, port, host, url: `http://localhost:${port}`, stop: () => new Promise((r) => { timers.forEach(clearTimeout); server.close(() => r()); server.closeAllConnections?.(); }) });
     });
