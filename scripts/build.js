@@ -38,6 +38,19 @@ const inject = ['postject', out, 'NODE_SEA_BLOB', path.join(DIST, 'sea-prep.blob
 sh(path.join(ROOT, 'node_modules', '.bin', plat === 'win32' ? 'postject.cmd' : 'postject'), inject.slice(1), { shell: plat === 'win32' });
 if (plat === 'darwin') sh('codesign', ['--sign', '-', out]); // Apple Silicon refuses to run an unsigned (modified) binary: an ad-hoc signature satisfies it
 
+// Windows: mark the program as a windowed (GUI) app so double-clicking it does not open a console window.
+// Pennystead runs in the background and its own window (or browser tab) is the interface. Output still reaches a
+// program that pipes it (Claude's --mcp, the smoke test); typed into cmd.exe, --version/--help print nothing.
+if (plat === 'win32') {
+  const fd = fs.openSync(out, 'r+'), buf = Buffer.alloc(4);
+  fs.readSync(fd, buf, 0, 4, 0x3c);
+  const pe = buf.readUInt32LE(0), sub = pe + 24 + 68; // PE signature + file header + offset of Subsystem in the optional header
+  fs.readSync(fd, buf, 0, 4, pe);
+  if (buf.toString('latin1') !== 'PE\0\0') throw new Error('Not a Windows executable: cannot switch it to a windowed program.');
+  fs.writeSync(fd, Buffer.from([2, 0]), 0, 2, sub); // IMAGE_SUBSYSTEM_WINDOWS_GUI
+  fs.closeSync(fd);
+}
+
 // 4. smoke test what we just built
 const v = execFileSync(out, ['--version']).toString().trim();
 if (v !== version) throw new Error(`Built binary reports version ${v}, expected ${version}`);

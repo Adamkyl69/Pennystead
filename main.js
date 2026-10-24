@@ -39,6 +39,12 @@ function openDefault(url) {
   const [cmd, a] = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
   try { spawn(cmd, a, { stdio: 'ignore', detached: true }).on('error', () => {}).unref(); } catch { /* no browser available: the URL is printed below */ }
 }
+// The Windows app has no console window, so a problem is shown in a message box (and still printed for a terminal).
+function problem(msg) {
+  console.error(msg);
+  if (process.platform !== 'win32' || !require('./lib/config').PACKAGED) return;
+  try { spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', "Add-Type -AssemblyName PresentationFramework; [void][System.Windows.MessageBox]::Show($env:PENNYSTEAD_MSG, 'Pennystead')"], { stdio: 'ignore', windowsHide: true, env: { ...process.env, PENNYSTEAD_MSG: msg } }).on('error', () => {}).unref(); } catch { /* nowhere to show it */ }
+}
 function openBrowser(url) {
   if (flag('--no-browser') || process.env.PENNYSTEAD_NO_BROWSER === '1') return;
   // Its own window (Settings → Security → Window), unless the user prefers a normal browser tab.
@@ -73,7 +79,7 @@ function openBrowser(url) {
   }
   try {
     const s = await listen();
-    console.log(`\n  Pennystead ${VERSION} is running\n\n    Open:  ${s.url}\n    Data:  ${DATA_DIR}\n\n  Keep this window open while you use Pennystead.\n  Close it (or press Ctrl+C) to quit.\n`);
+    console.log(`\n  Pennystead ${VERSION} is running\n\n    Open:  ${s.url}\n    Data:  ${DATA_DIR}\n\n  Quit from Pennystead: Settings → Security → Quit Pennystead (or press Ctrl+C in a terminal).\n`);
     if (!updated) openBrowser(s.url); // after an update the open window reloads itself
     const quit = () => s.stop().then(() => process.exit(0));
     process.on('SIGINT', quit); process.on('SIGTERM', quit);
@@ -82,14 +88,14 @@ function openBrowser(url) {
       const old = await replaceOlder();
       if (old.replaced) {
         try { const s = await listen(); console.log(`\n  Pennystead ${VERSION} is running at ${s.url}\n`); openBrowser(s.url); const quit = () => s.stop().then(() => process.exit(0)); process.on('SIGINT', quit); process.on('SIGTERM', quit); return; }
-        catch (e2) { console.error(`Pennystead could not start: ${e2.message}`); process.exit(1); }
+        catch (e2) { problem(`Pennystead could not start: ${e2.message}`); process.exit(1); }
       }
-      if (old.stuck) console.error(`An older Pennystead (${old.running.version}) is still running. Quit it (Settings → Security → Quit Pennystead, or end pennystead.exe in Task Manager), then start Pennystead again.`);
+      if (old.stuck) problem(`An older Pennystead (${old.running.version}) is still running. Quit it (Settings → Security → Quit Pennystead, or end pennystead.exe in Task Manager), then start Pennystead again.`);
       // Is it Pennystead itself? Then just bring it up instead of failing.
       const r = old.running;
       if (r?.app === 'pennystead') { console.log(`Pennystead is already running at http://localhost:${port}. Opening it.`); openBrowser(`http://localhost:${port}`); process.exit(0); }
-      console.error(`Port ${port} is used by another program. Close it, or start Pennystead with --port <another number>.`);
-    } else console.error(`Pennystead could not start: ${e.message}`);
+      problem(`Port ${port} is used by another program. Close it, or start Pennystead with --port <another number>.`);
+    } else problem(`Pennystead could not start: ${e.message}`);
     process.exit(1);
   }
 })();
