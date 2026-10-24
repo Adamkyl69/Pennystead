@@ -235,7 +235,7 @@ async function start({ port = +process.env.PENNYSTEAD_PORT || +process.env.PORT 
       if (P === '/api/mcp/test' && METHOD === 'POST') {
         const { write } = await readBody(req), started = Date.now();
         const args = PACKAGED ? ['--mcp', ...(write ? ['--write'] : [])] : [path.join(__dirname, 'mcp.js')];
-        const child = require('child_process').spawn(process.execPath, args, { env: { ...process.env, PENNYSTEAD_DATA: DATA_DIR, MCP_WRITE: write ? '1' : '', PENNYSTEAD_NO_BROWSER: '1' }, stdio: ['pipe', 'pipe', 'pipe'] });
+        const child = require('child_process').spawn(process.execPath, args, { env: { ...process.env, PENNYSTEAD_DATA: DATA_DIR, MCP_WRITE: write ? '1' : '', PENNYSTEAD_NO_BROWSER: '1' }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
         const got = await new Promise((resolve) => {
           let out = '', err = '';
           const done = (r) => { clearTimeout(t); child.kill(); resolve(r); };

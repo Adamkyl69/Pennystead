@@ -73,3 +73,16 @@ test('the bank relay page only forwards to localhost, and its inline script matc
   assert.ok(html.includes(`'sha256-${hash}'`), 'update the CSP hash after editing the script');
   assert.match(js, /'http:\/\/localhost:' \+ port \+ '\/callback'/); assert.ok(!/fetch\(|XMLHttpRequest|localStorage|<img|src=/.test(js), 'it sends nothing anywhere else');
 });
+
+test('the Windows app is marked as a windowed program, so no cmd window opens next to it', () => {
+  const { setSubsystem, GUI, CONSOLE } = require('../scripts/winsubsystem');
+  // A minimal PE32+ header: "MZ", the PE offset at 0x3c, "PE\0\0", the COFF header, then the optional header.
+  const b = Buffer.alloc(0x200); b.write('MZ', 0, 'latin1'); b.writeUInt32LE(0x80, 0x3c); b.write('PE\0\0', 0x80, 'latin1');
+  b.writeUInt16LE(0x20b, 0x80 + 24); b.writeUInt16LE(CONSOLE, 0x80 + 24 + 68);
+  assert.equal(setSubsystem(b), CONSOLE);
+  assert.equal(b.readUInt16LE(0x80 + 24 + 68), GUI);
+  assert.equal(setSubsystem(b), GUI, 'running it again changes nothing');
+  assert.throws(() => setSubsystem(Buffer.from('#!/bin/sh\n'.padEnd(0x200))), /Not a Windows executable/);
+  const build = require('fs').readFileSync(require('path').join(__dirname, '..', 'scripts', 'build.js'), 'utf8');
+  assert.match(build, /plat === 'win32'\) require\('\.\/winsubsystem'\)\.makeGui\(out\)/, 'the Windows build applies it');
+});

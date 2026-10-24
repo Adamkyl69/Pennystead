@@ -8,9 +8,9 @@ START
   Windows : run Pennystead (Start menu, or Pennystead.exe).
   macOS   : open Pennystead.app.
   Linux   : run ./pennystead (or install.sh for a menu entry).
-Your web browser opens Pennystead. On Windows and Linux a small window stays open while Pennystead runs;
-close it (or use Settings > Security > Quit Pennystead) to stop. If you start Pennystead twice, the second
-start just reopens the first.
+Pennystead opens in its own window (or your web browser) and keeps running in the background while you use it.
+To stop it, use Settings > Security > Quit Pennystead. If you start Pennystead twice, the second start just
+reopens the first.
 
 FIRST STEPS
   1. Import a CSV or Excel statement from your bank (Import), or

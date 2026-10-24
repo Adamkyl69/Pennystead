@@ -36,6 +36,7 @@ const fuse = bin.toString('latin1', at, at + 46); // NODE_SEA_FUSE_ + 32 hex cha
 if (plat === 'darwin') sh('codesign', ['--remove-signature', out]);
 const inject = ['postject', out, 'NODE_SEA_BLOB', path.join(DIST, 'sea-prep.blob'), '--sentinel-fuse', fuse, ...(plat === 'darwin' ? ['--macho-segment-name', 'NODE_SEA'] : [])];
 sh(path.join(ROOT, 'node_modules', '.bin', plat === 'win32' ? 'postject.cmd' : 'postject'), inject.slice(1), { shell: plat === 'win32' });
+if (plat === 'win32') require('./winsubsystem').makeGui(out); // no cmd window next to the app
 if (plat === 'darwin') sh('codesign', ['--sign', '-', out]); // Apple Silicon refuses to run an unsigned (modified) binary: an ad-hoc signature satisfies it
 
 // 4. smoke test what we just built
