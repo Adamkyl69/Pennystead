@@ -164,3 +164,34 @@ test('automatic sync can be switched off in settings', async () => {
   } finally { await srv.stop(); }
   assert.ok(dir);
 });
+
+test('categorized history file: categories are created from "Hobbies > Climbing", and the same merchant is then suggested for approval', async () => {
+  const imp = require('../lib/importer'), cfgMod = require('../lib/config');
+  const csv = 'Date,Description,Amount,Category\n2026-01-05,Boulder Wall Espoo,-24.50,Hobbies > Climbing\n2026-01-09,Boulder Wall Espoo,-18.00,Hobbies > Climbing\n2026-01-12,Lidl Helsinki,-60.10,Food/Groceries\n2026-01-15,Acme Salary,2000,Side gigs\n2026-01-20,Between my accounts,-300,Transfer\n';
+  const d = imp.upload(Buffer.from(csv), 'cats.csv'), account = { name: 'History test', currency: 'EUR' };
+  const opts = { useCategory: true, createCategories: true };
+  const pv = imp.preview(d.importId, d.mapping, account, opts);
+  assert.deepEqual(pv.newCategories.map((c) => c.account).sort(), ['expenses:hobbies:climbing', 'income:side-gigs'], 'categories you have already are matched, new ones proposed');
+  assert.equal(imp.preview(d.importId, d.mapping, account, { useCategory: true }).newCategories.length, 0, 'not creating: nothing is created');
+  imp.commit(d.importId, d.mapping, account, opts);
+  assert.ok(cfgMod.loadConfig().categories.includes('expenses:hobbies:climbing'));
+  const txs = await core.transactions();
+  const cat = (desc) => txs.find((t) => t.desc === desc)?.category;
+  assert.equal(cat('Boulder Wall Espoo'), 'expenses:hobbies:climbing');
+  assert.equal(cat('Acme Salary'), 'income:side-gigs');
+  assert.equal(cat('Lidl Helsinki'), 'expenses:food:groceries');
+  assert.equal(cat('Between my accounts'), 'transfers:internal');
+  // The same merchant shows up again (a bank sync): uncategorized, but suggested. A merchant never seen gets no suggestion.
+  const more = store.txs(), acct = Object.values(more).find((t) => t.desc === 'Boulder Wall Espoo').acct;
+  more.again1 = { acct, date: '2026-02-03', amount: -31, cur: 'EUR', desc: 'Boulder Wall Espoo', text: 'Boulder Wall Espoo' };
+  more.again2 = { acct, date: '2026-02-04', amount: -9, cur: 'EUR', desc: 'Qwertyuiop Zyx Oy', text: 'Qwertyuiop Zyx Oy' };
+  store.saveTxs(more); require('../lib/journal').rebuildBank();
+  const page = await core.transactionsPage({ pending: '1', limit: 500 });
+  const known = page.rows.find((t) => t.desc === 'Boulder Wall Espoo'), unknown = page.rows.find((t) => t.desc === 'Qwertyuiop Zyx Oy');
+  assert.equal(known.suggestion.category, 'expenses:hobbies:climbing');
+  assert.equal(unknown.suggestion, undefined);
+  assert.ok(page.rows.every((t) => t.category.endsWith(':uncategorized')), 'the filter keeps only what needs a category');
+  assert.ok(page.pending >= 2);
+  core.assignMerchant(known.merchant, known.suggestion.category); // "Approve"
+  assert.equal((await core.transactions()).find((t) => t.id === 'again1').category, 'expenses:hobbies:climbing');
+});

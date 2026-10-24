@@ -65,7 +65,7 @@ function txTable(rows, editable, cats = [], sel = null) {
   const box = sel ? (x) => `<td style="width:28px"><input type="checkbox" data-sel="${esc(x.id)}" ${sel.has(x.id) ? 'checked' : ''} aria-label="Select"></td>` : () => '';
   const head = sel ? `<th style="width:28px"><input type="checkbox" id="selPage" ${rows.length && rows.every((x) => sel.has(x.id)) ? 'checked' : ''} aria-label="Select all shown"></th>` : '';
   return `<table><thead><tr>${head}<th>Date</th><th>Counterparty</th><th>Category</th>${editable ? '<th>Account</th>' : ''}<th class="n">Amount</th></tr></thead><tbody>${rows.map((x) => `<tr${sel?.has(x.id) ? ' class="sel"' : ''}>${box(x)}<td class="muted" style="white-space:nowrap">${esc(x.date)}</td><td>${esc(x.desc)}</td>
-    <td>${editable ? `<select data-tx="${esc(x.id)}">${catOptions(cats, x.category)}</select>` : `<span class="muted">${esc(catLabel(x.category))}</span>`}</td>${editable ? `<td class="muted">${esc(x.account.split(':').pop())}</td>` : ''}
+ <td>${editable && x.category.endsWith(':uncategorized') ? `<div class="row" style="flex-wrap:nowrap;gap:6px"><select data-pick="${esc(x.id)}"><option value="">Choose a category…</option>${catOptions(cats.filter((c) => !c.account.endsWith(':uncategorized')), x.suggestion?.category || '', x.amount < 0 ? 'expense' : 'income')}<option value="__new">＋ New category…</option></select><button class="btn sm primary" data-approve="${esc(x.id)}" title="Approve this category for ${esc(x.desc)}: past and future transactions of this merchant follow">Approve</button></div>${x.suggestion ? `<div class="muted" style="font-size:12px">Suggested · ${Math.round(x.suggestion.confidence * 100)}% sure · like ${esc(x.suggestion.because)}</div>` : '<div class="muted" style="font-size:12px">New merchant: choose a category</div>'}` : editable ? `<select data-tx="${esc(x.id)}">${catOptions(cats, x.category)}</select>` : `<span class="muted">${esc(catLabel(x.category))}</span>`}</td>${editable ? `<td class="muted">${esc(x.account.split(':').pop())}</td>` : ''}
     <td class="n ${x.amount < 0 ? '' : 'good'}">${money2(x.amount, x.cur)}</td></tr>`).join('') || `<tr><td colspan="6" class="empty">Nothing here yet.</td></tr>`}</tbody></table>`;
 }
 
@@ -313,7 +313,7 @@ pages.liabilities = {
 };
 
 // ---------- Transactions ----------
-const tx = { q: '', account: '', category: '', from: '', to: '', limit: 100 };
+const tx = { q: '', account: '', category: '', from: '', to: '', limit: 100, pending: '' };
 const txSel = new Set(); // selected transaction ids, kept while you search and page
 let txUndo = null;       // the last delete, for Undo
 pages.transactions = {
@@ -323,11 +323,11 @@ pages.transactions = {
     el.innerHTML = `<div class="bar"><input type="search" id="q" placeholder="Search counterparty…" value="${esc(tx.q)}" style="min-width:220px">
       <select id="acc"><option value="">All accounts</option>${first.accounts.map((a) => `<option value="${esc(a)}" ${a === tx.account ? 'selected' : ''}>${esc(a.split(':').pop())}</option>`).join('')}</select>
       <select id="cat"><option value="">All categories</option>${catOptions(first.categories, tx.category)}</select>
-      <input type="date" id="from" value="${tx.from}" title="From"><input type="date" id="to" value="${tx.to}" title="To"><a class="btn right" href="#/import">Import…</a></div>
-      <div id="undoBar"></div><div id="bulk"></div>
+      <input type="date" id="from" value="${tx.from}" title="From"><input type="date" id="to" value="${tx.to}" title="To"><label class="chk row"><input type="checkbox" id="pendOnly" ${tx.pending ? 'checked' : ''}> Only to approve</label><a class="btn right" href="#/import">Import…</a></div>
+      <div id="pend"></div><div id="undoBar"></div><div id="bulk"></div>
       <div class="tbl" id="txBody"></div><div id="more" style="text-align:center;margin-bottom:24px"></div><div id="trash"></div>`;
     const cats = first.categories;
-    let seq = 0, total = 0, rows = [];
+    let seq = 0, total = 0, rows = [], pending = 0;
     const bulkBar = () => {
       const n = txSel.size;
       $('#bulk', el).innerHTML = n ? `<div class="banner" style="position:sticky;top:0;z-index:2"><span><b>${n} selected</b>${total > n ? ` · <a id="selAll">Select all ${total} matching</a>` : ''} · <a id="selNone">Clear</a></span>
@@ -360,6 +360,26 @@ pages.transactions = {
     const draw = () => {
       $('#txBody', el).innerHTML = txTable(rows, true, cats, txSel);
       bulkBar();
+      const sure = [...new Map(rows.filter((x) => x.suggestion?.confidence >= 0.8).map((x) => [x.merchant, x])).values()];
+      $('#pend', el).innerHTML = pending ? `<div class="banner"><span><b>${pending} transaction${pending === 1 ? '' : 's'} need${pending === 1 ? 's' : ''} a category.</b> Known merchants come with a suggestion: check it and press Approve. For a new merchant, choose from your categories first.</span>${sure.length ? `<button class="btn sm primary" id="approveAll">Approve ${sure.length} suggestion${sure.length === 1 ? '' : 's'}</button>` : ''}</div>` : '';
+      if ($('#approveAll', el)) $('#approveAll', el).onclick = async () => {
+        if (!confirm(`Approve these ${sure.length} merchants?\n\n${sure.map((x) => `${x.desc} → ${catLabel(x.suggestion.category)}`).join('\n')}`)) return;
+        await run(() => api('/api/review/assign-many', 'POST', { items: sure.map((x) => ({ merchant: x.merchant, category: x.suggestion.category })) }), `${sure.length} merchants categorized`); load(); loadState().then(() => renderSide('transactions'));
+      };
+      $$('select[data-pick]', el).forEach((s) => (s.onchange = () => {
+        if (s.value !== '__new') return;
+        const row = rows.find((x) => x.id === s.dataset.pick), name = prompt('New category, e.g. food:restaurants (a name alone is filed under ' + (row.amount < 0 ? 'expenses' : 'income') + ')');
+        if (!name) { s.value = ''; return; }
+        const slug = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        const acct = /^(expenses|income|transfers)(:|$)/i.test(name) ? name.toLowerCase().replace(/\s+/g, '-') : `${row.amount < 0 ? 'expenses' : 'income'}:${name.split(/[:>/]/).map(slug).filter(Boolean).join(':')}`;
+        const o = document.createElement('option'); o.value = acct; o.textContent = catLabel(acct); s.insertBefore(o, s.lastChild); s.value = acct;
+      }));
+      $$('[data-approve]', el).forEach((b) => (b.onclick = async () => {
+        const row = rows.find((x) => x.id === b.dataset.approve), sel = $(`select[data-pick="${CSS.escape(b.dataset.approve)}"]`, el);
+        if (!sel.value || sel.value === '__new') return toast('Choose a category first');
+        await run(async () => { await api('/api/categories', 'POST', { account: sel.value }); await api('/api/review/assign', 'POST', { merchant: row.merchant, category: sel.value }); }, `${row.desc} → ${catLabel(sel.value)}`);
+        load(); loadState().then(() => renderSide('transactions'));
+      }));
       $$('[data-tx]', el).forEach((s) => (s.onchange = async () => { await run(() => api('/api/override', 'POST', { id: s.dataset.tx, category: s.value }), 'Category updated'); loadState().then(() => renderSide('transactions')); }));
       $$('[data-sel]', el).forEach((c) => (c.onchange = () => { if (c.checked) txSel.add(c.dataset.sel); else txSel.delete(c.dataset.sel); c.closest('tr').classList.toggle('sel', c.checked); const all = $('#selPage', el); if (all) all.checked = rows.every((x) => txSel.has(x.id)); bulkBar(); }));
       if ($('#selPage', el)) $('#selPage', el).onchange = (e) => { rows.forEach((x) => (e.target.checked ? txSel.add(x.id) : txSel.delete(x.id))); draw(); };
@@ -367,12 +387,13 @@ pages.transactions = {
     const load = async () => {
       const mine = ++seq, r = await api('/api/transactions?' + new URLSearchParams(tx));
       if (mine !== seq) return; // a newer search was typed while this one loaded
-      rows = r.rows; total = r.total; draw();
+      rows = r.rows; total = r.total; pending = r.pending; draw();
       $('#more', el).innerHTML = r.total > r.rows.length ? `<button class="btn" id="moreBtn">Show more (${r.total - r.rows.length} left)</button>` : `<span class="muted">${r.total} transactions</span>`;
       if ($('#moreBtn', el)) $('#moreBtn', el).onclick = () => { tx.limit += 100; load(); };
     };
     let t; const reload = () => { tx.limit = 100; load(); };
     $('#q', el).oninput = (e) => { tx.q = e.target.value; clearTimeout(t); t = setTimeout(reload, 250); };
+    $('#pendOnly', el).onchange = (e) => { tx.pending = e.target.checked ? '1' : ''; reload(); };
     for (const [id, k] of [['acc', 'account'], ['cat', 'category'], ['from', 'from'], ['to', 'to']]) $('#' + id, el).onchange = (e) => { tx[k] = e.target.value; reload(); };
     undoBar(); load(); trash();
   },
@@ -869,7 +890,8 @@ function impMap(el) {
         <label>Category column (optional)${colSel('category', d, m.category)}</label>
         <label>Balance column (optional)${colSel('balanceCol', d, m.balance)}</label>
         <label class="chk"><input type="checkbox" name="invert" ${m.invert ? 'checked' : ''}> Flip signs (expenses are positive in my file)</label>
-        <label class="chk" id="uc"><input type="checkbox" name="useCategory" ${imp.opts.useCategory ? 'checked' : ''}> Use the category column when it matches one of my categories</label></div>`)}
+        <label class="chk" id="uc"><input type="checkbox" name="useCategory" ${imp.opts.useCategory ? 'checked' : ''}> Use the category column (my categories first; names like "Food &gt; Restaurants" are understood)</label>
+        <label class="chk"><input type="checkbox" name="createCategories" ${imp.opts.createCategories !== false ? 'checked' : ''}> Create categories from the file that I do not have yet</label></div>`)}
     <div class="row" style="margin-bottom:24px"><button class="btn primary" id="toPreview">Preview →</button><span class="muted" style="font-size:12px">Nothing is saved yet.</span></div></form>`;
 
   const form = $('#mapForm', el), sync = () => {
@@ -898,7 +920,7 @@ function impCollect(form) {
   const f = form.elements, d = imp.d;
   imp.mapping = { date: num(f.date.value), dateFormat: f.dateFormat.value, desc: num(f.desc.value), message: num(f.message.value), mode: f.mode.value, amount: num(f.amount.value), direction: num(f.direction.value), debit: num(f.debit.value), credit: num(f.credit.value), decimal: f.decimal.value, currency: num(f.currency.value), category: num(f.category.value), balance: num(f.balanceCol.value), invert: f.invert.checked };
   imp.account = f.account.value; imp.newName = f.newName.value; imp.newCur = f.newCur.value.toUpperCase(); imp.balance = f.balance.value;
-  imp.opts = { ...imp.opts, useCategory: f.useCategory.checked && imp.mapping.category != null };
+  imp.opts = { ...imp.opts, useCategory: f.useCategory.checked && imp.mapping.category != null, createCategories: f.createCategories.checked };
 }
 const impAccountBody = () => (imp.account === '__new' ? { name: imp.newName, currency: imp.newCur } : { uid: imp.account });
 const impOptions = () => ({ ...imp.opts, balance: imp.balance === '' ? undefined : imp.balance });
@@ -937,7 +959,7 @@ function impPreview(el) {
       ${p.balance ? `<p class="muted" style="margin:8px 0 0;font-size:13px">${p.balance.used ? `Account balance will be set to <b>${money(p.balance.value, cur, { d: 2 })}</b> as of ${esc(p.balance.date)} (${p.balance.source === 'column' ? 'from the Balance column' : 'as you entered'}).` : `<span class="warn">The balance in this file (${money(p.balance.value, cur, { d: 2 })} on ${esc(p.balance.date)}) is older than your latest data, so it is ignored and today's balance is kept.</span>`}</p>` : p.account.isNew ? '<p class="muted" style="margin:8px 0 0;font-size:13px">No balance given: the account balance will be the sum of these transactions (starting from zero). Go back and enter a balance to start from a real figure.</p>' : ''}
       ${p.aiCategorized ? `<p class="muted" style="margin:8px 0 0;font-size:13px"><span class="good">✦</span> AI categorized ${p.aiCategorized} transaction${p.aiCategorized === 1 ? '' : 's'} (marked ✦ below). You can change any of them later.</p>` : ''}
       ${ST.ai && p.uncategorized ? `<div class="row" style="margin:10px 0 0"><button class="btn" id="aiCats" title="Sends the merchant names (not amounts) to your AI model">✦ Categorize ${p.uncategorized} with AI</button><span class="muted" style="font-size:12px">${p.aiTried ? 'The AI left these: it could not tell, or they did not fit your categories.' : 'Your rules do not cover these yet; AI picks from your own categories.'}</span></div>` : ''}
-      ${p.unmappedCategories ? `<p class="muted" style="margin:8px 0 0;font-size:12px">${p.unmappedCategories} category value(s) in your file did not match one of your categories; your rules categorize those.</p>` : ''}</div>
+      ${p.newCategories?.length ? `<p class="muted" style="margin:8px 0 0;font-size:12px">${p.newCategories.length} new categor${p.newCategories.length === 1 ? 'y' : 'ies'} will be created: ${p.newCategories.slice(0, 12).map((c) => esc(catLabel(c.account))).join(', ')}${p.newCategories.length > 12 ? '…' : ''}. Pennystead learns from these: the next time a similar merchant shows up, it suggests the same category for you to approve.</p>` : ''}${p.unmappedCategories ? `<p class="muted" style="margin:8px 0 0;font-size:12px">${p.unmappedCategories} category value(s) in your file did not match one of your categories; your rules categorize those.</p>` : ''}</div>
     ${card('Preview', `First ${p.sample.length} rows. Categories come from your rules and can be changed afterwards.`, `<div class="tbl" style="margin:0"><table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Status</th><th class="n">Amount</th></tr></thead><tbody>${p.sample.map((r) => `<tr style="${r.include ? '' : 'opacity:.5'}"><td class="muted" style="white-space:nowrap">${esc(r.date)}</td><td>${esc(r.desc)}</td><td class="muted">${r.ai ? '<span class="good" title="Chosen by AI">✦</span> ' : ''}${esc(catLabel(r.category))}</td><td><span class="pill ${IMP_STATUS[r.status][1]}">${IMP_STATUS[r.status][0]}</span></td><td class="n ${r.amount < 0 ? '' : 'good'}">${money2(r.amount, cur)}</td></tr>`).join('')}</tbody></table></div>`)}
     ${p.errors.length ? card(`Rows with problems (${c.errors})`, 'These rows are skipped. Fix the mapping above or correct the file if they should be included.', `<div class="tbl" style="margin:0"><table><tbody>${p.errors.map((e) => `<tr><td class="muted" style="width:70px">row ${e.line}</td><td class="bad" style="width:36%">${esc(e.error)}</td><td class="muted">${esc(e.values)}</td></tr>`).join('')}</tbody></table></div>`) : ''}
     <div class="row" style="margin-bottom:24px"><button class="btn primary" id="commit" ${c.toImport ? '' : 'disabled'}>Import ${c.toImport} transaction${c.toImport === 1 ? '' : 's'}</button><button class="btn" id="back2">Back</button></div>`;
