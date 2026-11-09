@@ -73,6 +73,7 @@ jobs:
         with:
           name: pennystead-${{ matrix.name }}
           path: release/*
+          retention-days: 3
 
   publish:
     needs: build
